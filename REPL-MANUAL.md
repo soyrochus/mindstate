@@ -40,6 +40,21 @@ mstate -e init_graph.cypher queries.cypher
 mstate -s custom_prompt.txt
 ```
 
+## API Mode
+
+You can run MindState as an HTTP service:
+
+```bash
+mstate --api
+# or
+mstate-api
+```
+
+Core endpoints:
+- `POST /v1/memory/remember`
+- `POST /v1/memory/recall`
+- `POST /v1/context/build`
+
 ## REPL Commands
 
 | Command | Description |
@@ -48,6 +63,26 @@ mstate -s custom_prompt.txt
 | `\h` | Show help message |
 | `\llm [on\|off]` | Toggle LLM mode (AI assistance) |
 | `\log [on\|off]` | Toggle logging of interactions |
+| `\mode [shell\|memory]` | Switch between low-level shell and higher-level memory workflows |
+| `\remember KIND \| CONTENT` | Store canonical memory from TUI workflow |
+| `\recall QUERY` | Run ranked semantic memory recall |
+| `\context QUERY` | Build a bounded context bundle |
+| `\inspect MEMORY_ID` | Inspect stored memory content, metadata, and provenance |
+
+## Higher-Level Memory Workflow (TUI)
+
+Use TUI mode and switch to memory behavior:
+
+```bash
+mstate --tui
+```
+
+Inside TUI:
+- `\mode memory` to default plain input into remember-flow capture
+- `\remember note | content...` for explicit captures
+- `\recall <query>` for ranked retrieval
+- `\context <query>` for bounded context bundles
+- `\inspect <memory_id>` for memory inspection
 
 ## LLM Mode Examples
 
@@ -227,6 +262,15 @@ AGE_GRAPH=mindstate
 OPENAI_API_KEY=your_api_key_here
 OPENAI_MODEL_NAME=gpt-4.1
 OPENAI_TEMPERATURE=0
+
+# API settings
+MS_API_HOST=127.0.0.1
+MS_API_PORT=8000
+
+# Embedding settings for remember/recall/context
+MS_EMBEDDING_PROVIDER=openai
+MS_EMBEDDING_MODEL=text-embedding-3-small
+MS_EMBEDDING_DIMENSIONS=1536
 ```
 
 ### Command Line Options
@@ -237,6 +281,10 @@ mstate [options] [files...]
 Options:
   -h, --help            Show help message
   -e, --execute         Execute files and exit (no REPL)
+  -t, --tui             Launch Textual TUI
+  --api                 Run FastAPI service
+  --api-host HOST       API host bind address
+  --api-port PORT       API port
   -s FILE, --system-prompt FILE
                         Path to custom system prompt file
 ```
@@ -280,6 +328,10 @@ Options:
    - Check your `OPENAI_API_KEY` environment variable
    - Verify internet connectivity
    - Switch to direct mode with `\llm off`
+
+4. **Remember fails with embedding unavailable**
+   - Set `MS_EMBEDDING_PROVIDER=local` for local/dev testing
+   - Or provide valid OpenAI/Azure embedding credentials in `.env`
 
 ### Debug Mode
 

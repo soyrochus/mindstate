@@ -34,11 +34,21 @@ def main() -> None:
     parser.add_argument("files", nargs="*", help="Cypher files to load and execute")
     parser.add_argument("-e", "--execute", action="store_true", help="Execute files and exit (do not start REPL)")
     parser.add_argument("-t", "--tui", action="store_true", help="Launch the Textual TUI instead of the standard REPL")
+    parser.add_argument("--api", action="store_true", help="Run the FastAPI service instead of the REPL")
+    parser.add_argument("--api-host", default=settings.api.host, help="API host bind address")
+    parser.add_argument("--api-port", type=int, default=settings.api.port, help="API port")
     parser.add_argument("-s", "--system-prompt", help="Path to a file containing a system prompt for the LLM")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output (show stack traces on errors)")
     args = parser.parse_args()
 
     logger = setup_logging(args.verbose)
+
+    if args.api:
+        import uvicorn
+
+        print(f"MindState API server listening on http://{args.api_host}:{args.api_port}")
+        uvicorn.run("mindstate.api:app", host=args.api_host, port=args.api_port, reload=False)
+        return
 
     print(f"MindState for AGE/PostgreSQL - graph: {settings.graph_name}")
 

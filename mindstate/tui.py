@@ -15,6 +15,8 @@ from .db import (
 )
 from .llm import build_send_cypher_tool, create_agent_executor, create_llm
 from .logging_utils import VerboseCallback, set_log_sink
+from .memory_models import ContextBuildInput, RecallInput, RememberInput
+from .memory_service import EmbeddingUnavailableError, MindStateService
 
 
 def _parse_toggle(value: str) -> Optional[bool]:
@@ -122,6 +124,7 @@ def run_tui(
         llm_enabled = reactive(True)
         connected = reactive(True)
         model_name = reactive("")
+        workflow_mode = reactive("shell")
 
         def __init__(self):
             super().__init__()
@@ -134,6 +137,7 @@ def run_tui(
             self._agent_executor = None
             self._callbacks = [VerboseCallback(self.log)] if verbose else None
             self._clock_timer: Optional[Timer] = None
+            self._memory: Optional[MindStateService] = None
 
         def compose(self) -> ComposeResult:  # type: ignore[override]
             # Title/Header
@@ -202,7 +206,7 @@ def run_tui(
 
             with Container(classes="footer"):
                 self.commands = Static(
-                    r"Commands: \\q Quit  •  \\log [on|off]  •  \\llm [on|off]  •  \\h Help  •  Alt+Up Prev  •  Alt+Down Next  •  Shift+Enter New line  •  Esc then Enter Send",
+                    r"Commands: \\mode [shell|memory]  •  \\remember KIND | TEXT  •  \\recall QUERY  •  \\context QUERY  •  \\inspect ID  •  \\llm [on|off]  •  \\log [on|off]  •  \\q Quit",
                     classes="commands",
                 )
                 yield self.commands
@@ -220,6 +224,11 @@ def run_tui(
                     load_and_execute_files(self._cur, self._conn, files, self._settings)
                 except Exception as e:  # pragma: no cover
                     self._append_log(f"[WARN] Error executing files: {e}")
+
+            try:
+                self._memory = MindStateService(self._cur, self._conn, self._settings)
+            except Exception as e:
+                self._append_log(f"[WARN] Memory service initialization error: {e}")
 
             # Initialize LLM agent (may fail -> cypher-only mode)
             try:
@@ -311,7 +320,7 @@ def run_tui(
             time_str = datetime.now().strftime("%H:%M")
             model = self.model_name if self.llm_enabled else "-"
             status = (
-                f"Status: [green]Connected[/] | LLM: {'[green]ON[/]' if self.llm_enabled else '[red]OFF[/]'}  "
+                f"Status: [green]Connected[/] | Mode: [cyan]{self.workflow_mode.upper()}[/] | LLM: {'[green]ON[/]' if self.llm_enabled else '[red]OFF[/]'}  "
                 f"| Model: {model} | Log: {'[green]ON[/]' if self.log_enabled else '[yellow]OFF[/]'} | Time: {time_str}"
             )
             self.status.update(status)
@@ -476,6 +485,11 @@ def run_tui(
                 help_text = (
                     "Available commands:\n"
                     "  \\q              Quit the REPL\n"
+                    "  \\mode X         Switch mode: shell or memory\n"
+                    "  \\remember K | C Store canonical memory (kind K, content C)\n"
+                    "  \\recall QUERY   Ranked semantic memory recall\n"
+                    "  \\context QUERY  Build a bounded task context bundle\n"
+                    "  \\inspect ID     Inspect stored memory item details\n"
                     "  \\log [on|off]   Toggle logging of LLM and DB interactions\n"
                     "  \\llm [on|off]   Toggle LLM usage (off executes Cypher directly)\n"
                     "  \\h              Show this help message\n"
@@ -533,6 +547,64 @@ def run_tui(
                     self._append_log("[WARN] Usage: \\llm [on|off|true|false]")
                 return
 
+            if stripped.startswith("\\mode"):
+                parts = stripped.split(maxsplit=1)
+                if len(parts) != 2 or parts[1] not in {"shell", "memory"}:
+                    self._append_log("[WARN] Usage: \\mode [shell|memory]")
+                    return
+                self.workflow_mode = parts[1]
+                self._append_log(f"[INFO] Workflow mode set to {self.workflow_mode}.")
+                self._update_status()
+                return
+
+            if stripped.startswith("\\remember"):
+                if self._memory is None:
+                    self._append_log("[WARN] Memory service is unavailable.")
+                    return
+                body = stripped[len("\\remember") :].strip()
+                if "|" not in body:
+                    self._append_log("[WARN] Usage: \\remember KIND | CONTENT")
+                    return
+                kind, content = [segment.strip() for segment in body.split("|", 1)]
+                if not kind or not content:
+                    self._append_log("[WARN] Usage: \\remember KIND | CONTENT")
+                    return
+                await self._remember(kind, content)
+                return
+
+            if stripped.startswith("\\recall"):
+                if self._memory is None:
+                    self._append_log("[WARN] Memory service is unavailable.")
+                    return
+                query = stripped[len("\\recall") :].strip()
+                if not query:
+                    self._append_log("[WARN] Usage: \\recall QUERY")
+                    return
+                await self._recall(query)
+                return
+
+            if stripped.startswith("\\context"):
+                if self._memory is None:
+                    self._append_log("[WARN] Memory service is unavailable.")
+                    return
+                query = stripped[len("\\context") :].strip()
+                if not query:
+                    self._append_log("[WARN] Usage: \\context QUERY")
+                    return
+                await self._build_context(query)
+                return
+
+            if stripped.startswith("\\inspect"):
+                if self._memory is None:
+                    self._append_log("[WARN] Memory service is unavailable.")
+                    return
+                memory_id = stripped[len("\\inspect") :].strip()
+                if not memory_id:
+                    self._append_log("[WARN] Usage: \\inspect MEMORY_ID")
+                    return
+                await self._inspect(memory_id)
+                return
+
             self._append_log(f"[WARN] Unknown command: {stripped}")
 
         async def _send(self, message: str) -> None:
@@ -550,6 +622,13 @@ def run_tui(
 
             # Add to history
             self._history_add(text)
+
+            if self.workflow_mode == "memory":
+                if self._memory is None:
+                    self._log_write(self.chat_panel, "[yellow]▎ Memory service is unavailable.[/]")
+                    return
+                await self._remember("note", text)
+                return
 
             if self.llm_enabled:
                 if self._agent_executor is None:
@@ -586,6 +665,85 @@ def run_tui(
                 else:
                     err = str(result) if not isinstance(result, str) else result
                     self._log_write(self.chat_panel, f"[red]▎ {err}[/]")
+
+        async def _remember(self, kind: str, content: str) -> None:
+            if self._memory is None:
+                self._log_write(self.chat_panel, "[yellow]▎ Memory service is unavailable.[/]")
+                return
+            try:
+                result = await asyncio.to_thread(
+                    self._memory.remember,
+                    RememberInput(kind=kind, content=content, source="tui", author="user"),
+                )
+                memory_id = result["memory"]["memory_id"]
+                self._log_write(
+                    self.chat_panel,
+                    f"[cyan]▎ Remembered {kind} as memory {memory_id} ({result['chunk_count']} chunk(s)).[/]",
+                )
+            except EmbeddingUnavailableError as e:
+                self._log_write(self.chat_panel, f"[red]▎ Remember failed: {e}[/]")
+            except Exception as e:
+                self._log_write(self.chat_panel, f"[red]▎ Remember error: {e}[/]")
+
+        async def _recall(self, query: str) -> None:
+            if self._memory is None:
+                self._log_write(self.chat_panel, "[yellow]▎ Memory service is unavailable.[/]")
+                return
+            try:
+                results = await asyncio.to_thread(
+                    self._memory.recall,
+                    RecallInput(query=query, limit=self._settings.memory.default_recall_limit),
+                )
+                if not results:
+                    self._log_write(self.chat_panel, "[cyan]▎ No memory matches found.[/]")
+                    return
+                self._log_write(self.chat_panel, f"[cyan]▎ Top {len(results)} recall result(s):[/]")
+                for item in results:
+                    preview = item.content[:120].replace("\n", " ")
+                    self._log_write(
+                        self.chat_panel,
+                        f"[cyan]▎ - {item.memory_id} [{item.kind}] score={item.score:.3f} {preview}[/]",
+                    )
+            except EmbeddingUnavailableError as e:
+                self._log_write(self.chat_panel, f"[red]▎ Recall failed: {e}[/]")
+            except Exception as e:
+                self._log_write(self.chat_panel, f"[red]▎ Recall error: {e}[/]")
+
+        async def _build_context(self, query: str) -> None:
+            if self._memory is None:
+                self._log_write(self.chat_panel, "[yellow]▎ Memory service is unavailable.[/]")
+                return
+            try:
+                bundle = await asyncio.to_thread(
+                    self._memory.build_context,
+                    ContextBuildInput(query=query, limit=self._settings.memory.default_recall_limit),
+                )
+                self._log_write(self.chat_panel, f"[cyan]▎ {bundle.overview}[/]")
+                self._log_write(
+                    self.chat_panel,
+                    f"[cyan]▎ Supporting items: {len(bundle.supporting_items)} | Linked records: {len(bundle.linked_records)}[/]",
+                )
+            except EmbeddingUnavailableError as e:
+                self._log_write(self.chat_panel, f"[red]▎ Context build failed: {e}[/]")
+            except Exception as e:
+                self._log_write(self.chat_panel, f"[red]▎ Context build error: {e}[/]")
+
+        async def _inspect(self, memory_id: str) -> None:
+            if self._memory is None:
+                self._log_write(self.chat_panel, "[yellow]▎ Memory service is unavailable.[/]")
+                return
+            try:
+                item = await asyncio.to_thread(self._memory.inspect_memory, memory_id)
+                if not item:
+                    self._log_write(self.chat_panel, f"[cyan]▎ Memory {memory_id} not found.[/]")
+                    return
+                preview = str(item.get("content", ""))[:200].replace("\n", " ")
+                self._log_write(
+                    self.chat_panel,
+                    f"[cyan]▎ Memory {memory_id}: kind={item.get('kind')} source={item.get('source')} content={preview}[/]",
+                )
+            except Exception as e:
+                self._log_write(self.chat_panel, f"[red]▎ Inspect error: {e}[/]")
 
         # App-level key handling not required; handled in SubmitTextArea
         def action_send(self) -> None:

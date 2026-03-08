@@ -9,7 +9,7 @@
 
 A persistent AI memory substrate that stores knowledge as canonical items and exposes it through cognitive operations — remember, recall, build context — rather than raw storage mechanics.
 
-> **NOTE**: The current implementation is the low-level foundation: a direct `mstate` shell against the PostgreSQL/AGE/pgvector substrate, supporting Cypher execution, LLM-assisted natural language queries, and interactive REPL and TUI modes. Higher-level memory behaviors (capture, recall, context assembly, MCP tools) are planned as the next layer on top of this base.
+> **NOTE**: MindState now includes a first behavior-oriented memory layer (`remember`, `recall`, `build_context`) exposed via FastAPI and TUI workflows, while preserving the low-level Cypher/LLM shell.
 
 **Components in this repo**
 
@@ -30,6 +30,8 @@ A persistent AI memory substrate that stores knowledge as canonical items and ex
 - Interactive MindState REPL for PostgreSQL/AGE
 - Execute Cypher scripts from files
 - LLM integration for query generation and explanation
+- Behavior-oriented memory API: `POST /v1/memory/remember`, `POST /v1/memory/recall`, `POST /v1/context/build`
+- Higher-level TUI memory workflows (`\\mode memory`, `\\remember`, `\\recall`, `\\context`, `\\inspect`) in `mstate --tui`
 - System prompt customization for LLM
 - Verbose error output for debugging
 - **Colourful Text User Interface (TUI):** Use the `-t` or `--tui` option to launch a modern, colourful Text User Interface for enhanced interaction.
@@ -54,6 +56,9 @@ options:
   -h, --help            show this help message and exit
   -e, --execute         Execute files and exit (do not start REPL)
   -t, --tui             Launch the Textual TUI instead of the standard REPL (shows a colourful Text User Interface)
+  --api                 Run the FastAPI service instead of the REPL
+  --api-host API_HOST   API host bind address
+  --api-port API_PORT   API port
   -s, --system-prompt SYSTEM_PROMPT
                         Path to a file containing a system prompt for the LLM
   -v, --verbose         Enable verbose output (show stack traces on errors)
@@ -82,6 +87,27 @@ See the full manual in `REPL-MANUAL.md` for screenshots, examples, tips.
 | `\llm [on \|off]` | Toggle LLM usage (off executes Cypher directly) |
 | `\h` | Show this help message |
 
+### TUI-Only Memory Commands
+The higher-level memory workflow is available in the Textual UI (`mstate --tui`), not in the standard REPL (`mstate`).
+
+| Command | Description |
+|---------|-------------|
+| `\mode [shell \| memory]` | Switch between low-level shell workflow and higher-level memory workflow |
+| `\remember KIND \| CONTENT` | Store canonical memory from TUI workflow |
+| `\recall QUERY` | Run ranked semantic memory recall |
+| `\context QUERY` | Build a bounded context bundle |
+| `\inspect MEMORY_ID` | Inspect stored memory content, metadata, and provenance |
+
+Quick TUI flow:
+```bash
+mstate --tui
+# inside TUI:
+\mode memory
+\remember note | Project alpha ships Friday.
+\recall alpha ships
+\context Prepare Friday release context
+```
+
 ### Quick Examples
 Natural language (LLM mode):
 ```
@@ -97,7 +123,7 @@ MATCH (n)-[r]->(m) RETURN n, r, m;
 CREATE (p:Person {name: 'Alice', age: 30}) RETURN p;
 ```
 
-### Environment Variables (REPL)
+### Environment Variables (REPL + Memory API)
 Put these in a `.env` (see `example.env`):
 ```
 PGHOST=localhost
@@ -111,6 +137,15 @@ AGE_GRAPH=mindstate
 OPENAI_API_KEY=your_api_key_here
 OPENAI_MODEL_NAME=gpt-4.1
 OPENAI_TEMPERATURE=0
+
+# API server
+MS_API_HOST=127.0.0.1
+MS_API_PORT=8000
+
+# Memory embedding configuration
+MS_EMBEDDING_PROVIDER=openai
+MS_EMBEDDING_MODEL=text-embedding-3-small
+MS_EMBEDDING_DIMENSIONS=1536
 ```
 
 ### Running the REPL
@@ -129,6 +164,26 @@ mstate init_graph.cypher
 
 # Execute files only (no REPL)
 mstate -e init_graph.cypher more.cypher
+
+# Run API server
+mstate --api
+# or
+mstate-api
+```
+
+### Memory API quick example
+```bash
+curl -X POST http://127.0.0.1:8000/v1/memory/remember \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"note","content":"Project alpha ships Friday.","source":"meeting"}'
+
+curl -X POST http://127.0.0.1:8000/v1/memory/recall \
+  -H "Content-Type: application/json" \
+  -d '{"query":"alpha ships","limit":5}'
+
+curl -X POST http://127.0.0.1:8000/v1/context/build \
+  -H "Content-Type: application/json" \
+  -d '{"query":"Prepare Friday release context","limit":5}'
 ```
 
 For advanced usage, read: `REPL-MANUAL.md`  
@@ -171,7 +226,7 @@ psql -h localhost -U postgres -d postgres
 ### Simple Graph & Vector Checks
 Create a node:
 ```sql
-SELECT * FROM cypher('my_graph', $$CREATE (n:Person {name: 'Alice', age: 30}) RETURN n$$) AS (n agtype);
+SELECT * FROM cypher('mindstate', $$CREATE (n:Person {name: 'Alice', age: 30}) RETURN n$$) AS (n agtype);
 ```
 Vector table:
 ```sql

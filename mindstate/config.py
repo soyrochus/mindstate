@@ -45,6 +45,22 @@ class LLMSettings:
 
 
 @dataclass(frozen=True)
+class APISettings:
+    host: str
+    port: int
+
+
+@dataclass(frozen=True)
+class MemorySettings:
+    embedding_provider: str
+    embedding_model: str
+    embedding_dimensions: int
+    chunk_size: int
+    max_chunks_per_item: int
+    default_recall_limit: int
+
+
+@dataclass(frozen=True)
 class Settings:
     db: DBSettings
     graph_name: str
@@ -52,6 +68,8 @@ class Settings:
     history_file: str
     default_system_prompt: str
     llm: LLMSettings
+    api: APISettings
+    memory: MemorySettings
 
     def init_statements(self) -> List[str]:
         return [
@@ -101,6 +119,20 @@ def get_settings() -> Settings:
         azure_deployment=getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o"),
     )
 
+    api = APISettings(
+        host=getenv("MS_API_HOST", "127.0.0.1"),
+        port=int(getenv("MS_API_PORT", "8000")),
+    )
+
+    memory = MemorySettings(
+        embedding_provider=getenv("MS_EMBEDDING_PROVIDER", "openai"),
+        embedding_model=getenv("MS_EMBEDDING_MODEL", "text-embedding-3-small"),
+        embedding_dimensions=int(getenv("MS_EMBEDDING_DIMENSIONS", "1536")),
+        chunk_size=int(getenv("MS_CHUNK_SIZE", "500")),
+        max_chunks_per_item=int(getenv("MS_MAX_CHUNKS_PER_ITEM", "64")),
+        default_recall_limit=int(getenv("MS_DEFAULT_RECALL_LIMIT", "10")),
+    )
+
     return Settings(
         db=db,
         graph_name=getenv("AGE_GRAPH", "mindstate"),
@@ -108,4 +140,6 @@ def get_settings() -> Settings:
         history_file=os.path.expanduser("~/.mstate_history"),
         default_system_prompt=DEFAULT_SYSTEM_PROMPT.strip(),
         llm=llm,
+        api=api,
+        memory=memory,
     )
