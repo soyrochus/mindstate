@@ -61,7 +61,7 @@ options:
 
 ---
 
-## 1. REPL Overview (Primary Focus)
+## REPL Overview (Primary Focus)
 
 The Cypher LLM REPL lets you:
 
@@ -74,7 +74,7 @@ The Cypher LLM REPL lets you:
 
 See the full manual in `REPL-MANUAL.md` for screenshots, examples, tips.
 
-### 1.1 Key Commands (inline recap)
+### Key Commands (inline recap)
 | Command |  Description |
 |---------|-------------|
 | `\q` | Quit the REPL |
@@ -82,7 +82,7 @@ See the full manual in `REPL-MANUAL.md` for screenshots, examples, tips.
 | `\llm [on \|off]` | Toggle LLM usage (off executes Cypher directly) |
 | `\h` | Show this help message |
 
-### 1.2 Quick Examples
+### Quick Examples
 Natural language (LLM mode):
 ```
 show all nodes and their relationships
@@ -97,7 +97,7 @@ MATCH (n)-[r]->(m) RETURN n, r, m;
 CREATE (p:Person {name: 'Alice', age: 30}) RETURN p;
 ```
 
-### 1.3 Environment Variables (REPL)
+### Environment Variables (REPL)
 Put these in a `.env` (see `example.env`):
 ```
 PGHOST=localhost
@@ -113,7 +113,7 @@ OPENAI_MODEL_NAME=gpt-4.1
 OPENAI_TEMPERATURE=0
 ```
 
-### 1.4 Running the REPL
+### Running the REPL
 Install Python deps (uses `pyproject.toml`). You can use [uv](https://github.com/astral-sh/uv) or plain pip:
 ```bash
 # With uv (fast)
@@ -138,7 +138,7 @@ For Cypher syntax help: `Cypher Cheat Sheet and How-To Guide.md`
 
 ---
 
-## 2. Dockerized TriStore (Postgres + AGE + pgvector)
+## Dockerized TriStore (Postgres + AGE + pgvector)
 
 The provided `Dockerfile` builds a single image bundling:
 * PostgreSQL 16
@@ -147,7 +147,7 @@ The provided `Dockerfile` builds a single image bundling:
 
 Initialization script: `init-tristore.sql` (creates extensions + a default graph `my_graph`).
 
-### 2.1 Build & Run
+### Build & Run
 ```bash
 docker build -t tristore-pg:latest .
 docker run -d \
@@ -164,13 +164,13 @@ Defaults:
 * DB: `postgres`
 * Graph created at init: `my_graph`
 
-### 2.2 Verify Extensions
+### Verify Extensions
 ```bash
 psql -h localhost -U postgres -d postgres
 \dx   # should list age + vector
 ```
 
-### 2.3 Simple Graph & Vector Checks
+### Simple Graph & Vector Checks
 Create a node:
 ```sql
 SELECT * FROM cypher('my_graph', $$CREATE (n:Person {name: 'Alice', age: 30}) RETURN n$$) AS (n agtype);
@@ -188,12 +188,12 @@ Similarity search:
 SELECT * FROM embeddings ORDER BY embedding <-> '[0.1,0.2,0.3]' LIMIT 1;
 ```
 
-### 2.4 Using with the REPL
+### Using with the REPL
 Once the container is running, ensure your `.env` matches the exposed credentials, then start the REPL. Natural language queries will be rewritten into Cypher targeting the configured graph.
 
 ---
 
-## 3. Python Access (Outside the REPL)
+## Python Access (Outside the REPL)
 ```python
 import psycopg2
 
@@ -218,7 +218,7 @@ print(cur.fetchone())
 
 ---
 
-## 4. Project Structure (Abbrev.)
+## Project Structure (Abbrev.)
 ```
 cypherrepl/       # REPL implementation (CLI, db, LLM integration, formatting)
 cypher_llm_repl.py# Entry script
@@ -232,7 +232,7 @@ Cypher Cheat Sheet and How-To Guide.md
 
 ---
 
-## 5. Roadmap / Ideas
+## Roadmap / Ideas
 * Optional local embedding generation
 * More graph analytics helpers (degree, centrality summaries)
 * Export/import graph snapshots
@@ -241,17 +241,23 @@ Cypher Cheat Sheet and How-To Guide.md
 Contributions / issues welcome.
 
 ---
+## Principles of Participation
 
-## 6. License
+Everyone is invited and welcome to contribute: open issues, propose pull requests, share ideas, or help improve documentation.  
+Participation is open to all, regardless of background or viewpoint.  
 
-MIT License. See `LICENSE.txt` for full text.
+This project follows the [FOSS Pluralism Manifesto](./FOSS_PLURALISM_MANIFESTO.md),  
+which affirms respect for people, freedom to critique ideas, and space for diverse perspectives.  
 
-Copyright (c) 2025, Iwan van der Kleijn
 
+## License and Copyright
+
+Copyright (c) 2025,2026 Iwan van der Kleijn
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 ---
 
-## 7. Attribution & Notes
+## Attribution & Notes
 All bundled components (PostgreSQL, Apache AGE, pgvector) are open source. This repo glues them together for a smooth graph + vector + LLM exploration workflow.
 
-If you build something interesting with this, let me know or open a PR to showcase examples.
 If you build something interesting with this, let me know or open a PR to showcase examples.
