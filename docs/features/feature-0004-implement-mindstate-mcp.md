@@ -1,10 +1,10 @@
-# Feature 3 — Implement the MindState MCP server as an internal application module
+# Feature 4 — Implement the MindState MCP server as an internal application module
 
 ## Intent
 
 MindState should provide an MCP server so that external coding agents and assistants can use MindState as their shared cognitive substrate. The MCP server should be implemented as a **distinct internal module/service boundary inside the MindState application**, not as a completely separate product the user must install and operate independently.
 
-This matches the intended usage pattern already described in the agent-behavior discussion: MindState is the canonical substrate, exposed through a small cognitive tool surface, reinforced by instructions/wrappers/hooks as needed. 
+This matches the intended usage pattern already described in the agent-behavior discussion: MindState is the canonical substrate, exposed through a small cognitive tool surface, reinforced by instructions/wrappers/hooks as needed.
 
 ## Problem statement
 
@@ -16,6 +16,13 @@ The design problem is twofold:
 * the deployment must remain unified enough that the user does not feel they are running unrelated applications
 
 The correct model is: **one application, multiple interfaces**.
+
+## Depends on
+
+* Feature 2 — MindState API and memory layer (`MindStateService`, canonical `MemoryItem`, `remember`, `recall`, `build_context`)
+* Feature 3 — Graph contextualization (`GraphContextualizer`, `contextualize`, kind-aware auto-contextualization)
+
+The MCP server must call the same service layer as the HTTP API. Feature 3's `contextualize` operation is a first-class MCP tool and must be available before this feature is complete.
 
 ## Functional outcome
 
@@ -65,6 +72,7 @@ The MCP server should expose the compact cognitive toolset already identified in
 * `remember`
 * `recall`
 * `build_context`
+* `contextualize`
 
 Recommended first-wave tools:
 
@@ -74,13 +82,13 @@ Recommended first-wave tools:
 * `topic_digest`
 * `decision_history`
 
-These reflect the intended agent usage patterns described in the design conversation. 
+These reflect the intended agent usage patterns described in the design conversation.
 
 ### 3. Structured inputs and outputs
 
 Tool calls must accept and return structured data, even if the visible prompt surface in agents is natural language.
 
-This is critical. The design discussion is explicit that writes must be structured or retrieval quality will degrade. Work-session logging in particular should carry fields such as repository, branch, task, decisions, blockers, files changed, next steps, and source agent. 
+This is critical. The design discussion is explicit that writes must be structured or retrieval quality will degrade. Work-session logging in particular should carry fields such as repository, branch, task, decisions, blockers, files changed, next steps, and source agent.
 
 Therefore, MCP tool contracts should be schema-driven and explicit.
 
@@ -92,16 +100,17 @@ The MCP server should be optimized for the three core interaction moments alread
 * checkpoint save
 * end-of-task session save
 
-These are the highest-value workflows and should be directly supported by the tool definitions and examples. 
+These are the highest-value workflows and should be directly supported by the tool definitions and examples.
 
 ### 5. Same-core guarantee
 
-The MCP server must call the same underlying application services as the HTTP API/UI. There should not be separate “MCP-only” memory logic.
+The MCP server must call the same underlying application services as the HTTP API/UI. There should not be separate "MCP-only" memory logic.
 
 For example:
 
 * HTTP `POST /v1/memory/remember` and MCP `remember` should converge on the same service layer
 * HTTP `POST /v1/context/build` and MCP `build_context` should converge on the same service layer
+* HTTP `POST /v1/memory/contextualize` and MCP `contextualize` should converge on the same `GraphContextualizer` service
 
 This is essential for correctness and long-term maintainability.
 
@@ -119,12 +128,13 @@ Minimum input:
 * optional metadata/tags
 * optional source information
 * optional author/agent identity
+* `contextualize` (bool, default determined by kind policy — see Feature 3)
 
 Output:
 
 * stored memory identifier
 * status
-* any queued projection actions
+* any queued projection actions, including `graph_contextualize` if triggered
 
 ### Tool: `recall`
 
@@ -163,6 +173,25 @@ Output:
 * related decisions/open issues
 * provenance map
 
+### Tool: `contextualize`
+
+Purpose: trigger graph contextualization for recent or specified memory items.
+
+This tool is the MCP surface for the two-tier write model introduced in Feature 3. It allows an agent to explicitly anchor memory items in the AGE graph after they have been stored — extracting entities, resolving them against existing graph nodes, and writing typed relation edges.
+
+Minimum input:
+
+* `n` (int, default 1) — contextualize the n most recent non-contextualized items
+* `ids` (list of UUIDs, optional) — target specific items by memory_id instead of using n
+
+An agent finishing a work session should call `contextualize` after storing high-value items that were not auto-contextualized by the kind policy. An agent that explicitly tracks what it has written should use the `ids` form for precision.
+
+Output:
+
+* job identifier
+* count of items queued
+* status (`queued`)
+
 ### Tool: `log_work_session`
 
 Purpose: capture a structured coding/agent work session.
@@ -183,6 +212,9 @@ Output:
 
 * stored session item identifier
 * status
+* contextualization job identifier (auto-triggered — see note below)
+
+**Note on auto-contextualization**: `log_work_session` stores the session as a memory item. Any decisions and resolved blockers recorded in the session are stored as separate child items with kinds `decision` and `resolved_blocker` respectively. Because both of those kinds are in `AUTO_CONTEXTUALIZE_KINDS` (Feature 3), they are automatically contextualized without the agent needing to call `contextualize` explicitly. The session summary item itself (kind `work_session`) is not in the auto-contextualize set — the agent may call `contextualize` for it if the session was particularly significant.
 
 ### Tool: `find_related_code`
 
@@ -238,7 +270,7 @@ Typical settings may include:
 
 ### Security and access scope
 
-The MCP server must honor the same workspace, tenant, and visibility constraints as the API/UI. The technical design already makes clear that multi-tenancy and sensitivity boundaries matter and should not be retrofitted later. 
+The MCP server must honor the same workspace, tenant, and visibility constraints as the API/UI. The technical design already makes clear that multi-tenancy and sensitivity boundaries matter and should not be retrofitted later.
 
 ### Observability
 
@@ -248,7 +280,7 @@ MCP calls should be visible in application logs and metrics:
 * caller/agent identity where available
 * success/failure
 * duration
-* projection side effects for writes
+* projection side effects for writes, including contextualization jobs enqueued
 
 This is particularly important because MCP is part of the control plane for external agents.
 
@@ -267,19 +299,17 @@ Those can follow later. The goal here is the internal MCP server and the initial
 
 1. MindState can expose an MCP server from the same application/distribution.
 2. The MCP server is implemented as a dedicated internal module, not as duplicated business logic.
-3. The MCP tool surface includes at least `remember`, `recall`, and `build_context`.
+3. The MCP tool surface includes at least `remember`, `recall`, `build_context`, and `contextualize`.
 4. At least one structured write-oriented tool such as `log_work_session` is implemented.
-5. MCP tool execution uses the same application service layer as the HTTP API/UI.
-6. A connected agent can hydrate context, save a checkpoint/session, and retrieve project memory through MindState.
-7. The user is not required to install or operate a conceptually separate second application to obtain MCP functionality.
+5. `log_work_session` stores `decision` and `resolved_blocker` child items that are auto-contextualized by the kind policy.
+6. MCP tool execution uses the same application service layer as the HTTP API/UI.
+7. A connected agent can hydrate context, save a checkpoint/session, and retrieve project memory through MindState.
+8. The user is not required to install or operate a conceptually separate second application to obtain MCP functionality.
 
 ## Technical notes
 
-The agent-behavior document already states the correct overall architecture: MindState database → MindState service/API → MindState MCP server → instructions/skills/wrappers. This feature is the concrete implementation of that principle. 
+The agent-behavior document already states the correct overall architecture: MindState database → MindState service/API → MindState MCP server → instructions/skills/wrappers. This feature is the concrete implementation of that principle.
 
+## One practical warning
 
-# One practical warning
-
-For Feature 2 and Feature 3, resist the temptation to bypass the new service layer and “just call the old Cypher/db code directly” from every interface. That would preserve the brownfield code, but it would also preserve the wrong abstraction boundary. The old low-level shell should remain available, but the new application behaviors must converge on a proper MindState service layer derived from the canonical model described in the design notes. 
-
-If useful, I can turn these three specs into a numbered backlog format with fields like rationale, dependencies, risks, and test strategy.
+For Features 2, 3, and 4, resist the temptation to bypass the new service layer and "just call the old Cypher/db code directly" from every interface. That would preserve the brownfield code, but it would also preserve the wrong abstraction boundary. The old low-level shell should remain available, but the new application behaviors must converge on a proper MindState service layer derived from the canonical model described in the design notes.
