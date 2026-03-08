@@ -11,6 +11,8 @@ A persistent AI memory substrate that stores knowledge as canonical items and ex
 
 > **NOTE**: MindState now includes a first behavior-oriented memory layer (`remember`, `recall`, `build_context`) exposed via FastAPI and TUI workflows, while preserving the low-level Cypher/LLM shell.
 
+![Mindstate](./images/mindstate.png)
+
 **Components in this repo**
 
 | Part | What it is | Folder / File |
@@ -280,15 +282,6 @@ REPL-MANUAL.md    # Full REPL manual
 Cypher Cheat Sheet and How-To Guide.md
 ```
 
----
-
-## Roadmap / Ideas
-* Optional local embedding generation
-* More graph analytics helpers (degree, centrality summaries)
-* Export/import graph snapshots
-* Additional model provider abstractions
-
-Contributions / issues welcome.
 
 ---
 ## Principles of Participation
