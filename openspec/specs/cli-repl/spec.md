@@ -34,7 +34,7 @@ The CLI SHALL retain all existing functional behaviors without regression:
 - Custom system prompt (`--system-prompt`)
 - TUI launch (`--tui`)
 - Command history via prompt-toolkit
-- `\q`, `\h`, `\log`, `\llm` REPL commands
+- Unified slash-command handling shared with TUI (`\q`, `\h`, `\log`, `\llm`, `\contextualize`, `\mode`, `\remember`, `\recall`, `\context`, `\inspect`)
 
 #### Scenario: Direct Cypher mode
 - **WHEN** the user runs `\llm off` then submits a Cypher query
@@ -51,3 +51,10 @@ The CLI SHALL retain all existing functional behaviors without regression:
 #### Scenario: Help command
 - **WHEN** the user enters `\h` in the REPL
 - **THEN** all available REPL commands are listed
+
+### Requirement: REPL and TUI use a shared slash-command parser
+The CLI REPL SHALL use the same command parser/help metadata as the TUI so command syntax and usage messages remain consistent across both interfaces.
+
+#### Scenario: Shared parse behavior
+- **WHEN** a slash command is entered in both CLI and TUI
+- **THEN** the command is parsed using the same shared module and identical usage guidance is produced for invalid syntax

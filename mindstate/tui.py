@@ -6,6 +6,7 @@ from typing import List, Optional, Tuple
 
 from langchain_core.messages import AIMessage, HumanMessage
 
+from .commands import COMMAND_HELP_LINES, CommandParseError, parse_slash_command
 from .config import Settings
 from .db import (
     execute_cypher_with_smart_columns,
@@ -17,15 +18,6 @@ from .llm import build_send_cypher_tool, create_agent_executor, create_llm
 from .logging_utils import VerboseCallback, set_log_sink
 from .memory_models import ContextBuildInput, RecallInput, RememberInput
 from .memory_service import EmbeddingUnavailableError, MindStateService
-
-
-def _parse_toggle(value: str) -> Optional[bool]:
-    val = value.lower()
-    if val in {"on", "true"}:
-        return True
-    if val in {"off", "false"}:
-        return False
-    return None
 
 
 def run_tui(
@@ -206,7 +198,7 @@ def run_tui(
 
             with Container(classes="footer"):
                 self.commands = Static(
-                    r"Commands: \\mode [shell|memory]  •  \\remember KIND | TEXT  •  \\recall QUERY  •  \\context QUERY  •  \\inspect ID  •  \\llm [on|off]  •  \\log [on|off]  •  \\q Quit",
+                    r"Commands: \\h for unified command list",
                     classes="commands",
                 )
                 yield self.commands
@@ -478,134 +470,90 @@ def run_tui(
 
         async def _handle_command(self, cmd: str) -> None:
             stripped = cmd.strip()
-            if stripped == "\\q":
-                await self.action_quit()
-                return
-            if stripped == "\\h":
-                help_text = (
-                    "Available commands:\n"
-                    "  \\q              Quit the REPL\n"
-                    "  \\mode X         Switch mode: shell or memory\n"
-                    "  \\remember K | C Store canonical memory (kind K, content C)\n"
-                    "  \\recall QUERY   Ranked semantic memory recall\n"
-                    "  \\context QUERY  Build a bounded task context bundle\n"
-                    "  \\inspect ID     Inspect stored memory item details\n"
-                    "  \\log [on|off]   Toggle logging of LLM and DB interactions\n"
-                    "  \\llm [on|off]   Toggle LLM usage (off executes Cypher directly)\n"
-                    "  \\h              Show this help message\n"
-                )
-                for line in help_text.splitlines():
-                    # Show help in the main conversation panel (not the logs panel)
-                    self._log_write(self.chat_panel, f"[cyan]▎ {line}[/]")
-                return
-            if stripped.startswith("\\log"):
-                parts = stripped.split(maxsplit=1)
-                if len(parts) == 2:
-                    val = _parse_toggle(parts[1])
-                    if val is None:
-                        self._append_log("[WARN] Usage: \\log [on|off|true|false]")
-                    else:
-                        self.log_enabled = val
-                        # Show/hide logs pane
-                        self.query_one("#logs_container").display = val
-                        state = "enabled" if self.log_enabled else "disabled"
-                        self._append_log(f"[INFO] Logging {state}.")
-                        self._update_status()
-                else:
-                    self._append_log("[WARN] Usage: \\log [on|off|true|false]")
-                return
-            if stripped.startswith("\\llm"):
-                parts = stripped.split(maxsplit=1)
-                if len(parts) == 2:
-                    val = _parse_toggle(parts[1])
-                    if val is None:
-                        self._append_log("[WARN] Usage: \\llm [on|off|true|false]")
-                    else:
-                        if val and self._agent_executor is None:
-                            # Try to (re)initialize LLM
-                            try:
-                                send_cypher_tool = build_send_cypher_tool(
-                                    self._cur,
-                                    self._conn,
-                                    self._settings,
-                                    logger=self.log if self._verbose else None,
-                                    is_logging_enabled=lambda: self.log_enabled,
-                                )
-                                llm = create_llm(self._settings, callbacks=self._callbacks)
-                                self._agent_executor = create_agent_executor(
-                                    llm, send_cypher_tool, self._system_prompt
-                                )
-                                self.model_name = self._settings.llm.openai_model
-                            except Exception as e:
-                                self._append_log(f"[WARN] LLM initialization error: {e}")
-                                val = False
-                        self.llm_enabled = val
-                        state = "enabled" if self.llm_enabled else "disabled"
-                        self._append_log(f"[INFO] LLM {state}.")
-                        self._update_status()
-                else:
-                    self._append_log("[WARN] Usage: \\llm [on|off|true|false]")
+            try:
+                parsed = parse_slash_command(stripped)
+            except CommandParseError as e:
+                self._append_log(f"[WARN] {e}")
                 return
 
-            if stripped.startswith("\\mode"):
-                parts = stripped.split(maxsplit=1)
-                if len(parts) != 2 or parts[1] not in {"shell", "memory"}:
-                    self._append_log("[WARN] Usage: \\mode [shell|memory]")
-                    return
-                self.workflow_mode = parts[1]
+            if parsed.name == "quit":
+                await self.action_quit()
+                return
+            if parsed.name == "help":
+                for line in ["Available commands:", *COMMAND_HELP_LINES]:
+                    self._log_write(self.chat_panel, f"[cyan]▎ {line}[/]")
+                return
+            if parsed.name == "log":
+                self.log_enabled = parsed.args["enabled"]
+                self.query_one("#logs_container").display = self.log_enabled
+                state = "enabled" if self.log_enabled else "disabled"
+                self._append_log(f"[INFO] Logging {state}.")
+                self._update_status()
+                return
+            if parsed.name == "llm":
+                val = parsed.args["enabled"]
+                if val and self._agent_executor is None:
+                    try:
+                        send_cypher_tool = build_send_cypher_tool(
+                            self._cur,
+                            self._conn,
+                            self._settings,
+                            logger=self.log if self._verbose else None,
+                            is_logging_enabled=lambda: self.log_enabled,
+                        )
+                        llm = create_llm(self._settings, callbacks=self._callbacks)
+                        self._agent_executor = create_agent_executor(llm, send_cypher_tool, self._system_prompt)
+                        self.model_name = self._settings.llm.openai_model
+                    except Exception as e:
+                        self._append_log(f"[WARN] LLM initialization error: {e}")
+                        val = False
+                self.llm_enabled = val
+                self._append_log(f"[INFO] LLM {'enabled' if self.llm_enabled else 'disabled'}.")
+                self._update_status()
+                return
+            if parsed.name == "mode":
+                self.workflow_mode = parsed.args["mode"]
                 self._append_log(f"[INFO] Workflow mode set to {self.workflow_mode}.")
                 self._update_status()
                 return
-
-            if stripped.startswith("\\remember"):
+            if parsed.name == "remember":
+                await self._remember(parsed.args["kind"], parsed.args["content"])
+                return
+            if parsed.name == "recall":
+                await self._recall(parsed.args["query"])
+                return
+            if parsed.name == "context":
+                await self._build_context(parsed.args["query"])
+                return
+            if parsed.name == "inspect":
+                await self._inspect(parsed.args["memory_id"])
+                return
+            if parsed.name == "contextualize_n":
                 if self._memory is None:
                     self._append_log("[WARN] Memory service is unavailable.")
                     return
-                body = stripped[len("\\remember") :].strip()
-                if "|" not in body:
-                    self._append_log("[WARN] Usage: \\remember KIND | CONTENT")
-                    return
-                kind, content = [segment.strip() for segment in body.split("|", 1)]
-                if not kind or not content:
-                    self._append_log("[WARN] Usage: \\remember KIND | CONTENT")
-                    return
-                await self._remember(kind, content)
+                try:
+                    job = await asyncio.to_thread(self._memory.contextualize_n, parsed.args["n"])
+                    self._log_write(
+                        self.chat_panel,
+                        f"[cyan]▎ contextualization job queued: job_id={job.job_id or '(none)'} queued_count={job.queued_count}[/]",
+                    )
+                except Exception as e:
+                    self._log_write(self.chat_panel, f"[red]▎ contextualize error: {e}[/]")
                 return
-
-            if stripped.startswith("\\recall"):
+            if parsed.name == "contextualize_ids":
                 if self._memory is None:
                     self._append_log("[WARN] Memory service is unavailable.")
                     return
-                query = stripped[len("\\recall") :].strip()
-                if not query:
-                    self._append_log("[WARN] Usage: \\recall QUERY")
-                    return
-                await self._recall(query)
+                try:
+                    job = await asyncio.to_thread(self._memory.contextualize_ids, parsed.args["ids"])
+                    self._log_write(
+                        self.chat_panel,
+                        f"[cyan]▎ contextualization job queued: job_id={job.job_id or '(none)'} queued_count={job.queued_count}[/]",
+                    )
+                except Exception as e:
+                    self._log_write(self.chat_panel, f"[red]▎ contextualize error: {e}[/]")
                 return
-
-            if stripped.startswith("\\context"):
-                if self._memory is None:
-                    self._append_log("[WARN] Memory service is unavailable.")
-                    return
-                query = stripped[len("\\context") :].strip()
-                if not query:
-                    self._append_log("[WARN] Usage: \\context QUERY")
-                    return
-                await self._build_context(query)
-                return
-
-            if stripped.startswith("\\inspect"):
-                if self._memory is None:
-                    self._append_log("[WARN] Memory service is unavailable.")
-                    return
-                memory_id = stripped[len("\\inspect") :].strip()
-                if not memory_id:
-                    self._append_log("[WARN] Usage: \\inspect MEMORY_ID")
-                    return
-                await self._inspect(memory_id)
-                return
-
-            self._append_log(f"[WARN] Unknown command: {stripped}")
 
         async def _send(self, message: str) -> None:
             text = message.strip()

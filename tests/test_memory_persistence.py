@@ -33,5 +33,8 @@ def test_ensure_memory_schema_adds_structures_without_destructive_sql():
     assert "create table if not exists memory_chunks" in sql_blob
     assert "create table if not exists memory_embeddings" in sql_blob
     assert "create table if not exists memory_links" in sql_blob
+    assert "add column if not exists contextualized_at" in sql_blob
+    assert "add column if not exists contextualization_skipped" in sql_blob
+    assert "create table if not exists memory_contextualization_jobs" in sql_blob
     assert "drop table" not in sql_blob
     assert conn.committed is True

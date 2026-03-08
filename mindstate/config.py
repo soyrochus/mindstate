@@ -61,6 +61,15 @@ class MemorySettings:
 
 
 @dataclass(frozen=True)
+class ContextualizationSettings:
+    enabled: bool
+    auto_kinds: set[str]
+    confidence_threshold: float
+    merge_threshold: float
+    max_entities_per_item: int
+
+
+@dataclass(frozen=True)
 class Settings:
     db: DBSettings
     graph_name: str
@@ -70,6 +79,7 @@ class Settings:
     llm: LLMSettings
     api: APISettings
     memory: MemorySettings
+    contextualization: ContextualizationSettings
 
     def init_statements(self) -> List[str]:
         return [
@@ -100,6 +110,15 @@ DEFAULT_SYSTEM_PROMPT = (
 
 
 def get_settings() -> Settings:
+    def _parse_bool(value: str, *, default: bool) -> bool:
+        if value == "":
+            return default
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+
+    def _parse_kinds(raw: str) -> set[str]:
+        kinds = [part.strip() for part in raw.split(",")]
+        return {kind for kind in kinds if kind}
+
     db = DBSettings(
         host=getenv("PGHOST", "localhost"),
         port=int(getenv("PGPORT", "5432")),
@@ -133,6 +152,19 @@ def get_settings() -> Settings:
         default_recall_limit=int(getenv("MS_DEFAULT_RECALL_LIMIT", "10")),
     )
 
+    contextualization = ContextualizationSettings(
+        enabled=_parse_bool(getenv("MS_CONTEXTUALIZE_ENABLED", "true"), default=True),
+        auto_kinds=_parse_kinds(
+            getenv(
+                "MS_AUTO_CONTEXTUALIZE_KINDS",
+                "decision,architecture_note,resolved_blocker,task,observation,claim",
+            )
+        ),
+        confidence_threshold=float(getenv("MS_CONTEXTUALIZE_CONFIDENCE_THRESHOLD", "0.85")),
+        merge_threshold=float(getenv("MS_CONTEXTUALIZE_MERGE_THRESHOLD", "0.92")),
+        max_entities_per_item=int(getenv("MS_CONTEXTUALIZE_MAX_ENTITIES_PER_ITEM", "12")),
+    )
+
     return Settings(
         db=db,
         graph_name=getenv("AGE_GRAPH", "mindstate"),
@@ -142,4 +174,5 @@ def get_settings() -> Settings:
         llm=llm,
         api=api,
         memory=memory,
+        contextualization=contextualization,
     )

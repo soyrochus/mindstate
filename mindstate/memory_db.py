@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Sequence
+from uuid import uuid4
 
 from psycopg2.extras import Json
 
@@ -66,6 +67,26 @@ def ensure_memory_schema(cur, conn, settings: Settings) -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
         """,
+        """
+        ALTER TABLE memory_items
+            ADD COLUMN IF NOT EXISTS contextualized_at TIMESTAMPTZ NULL;
+        """,
+        """
+        ALTER TABLE memory_items
+            ADD COLUMN IF NOT EXISTS contextualization_skipped BOOLEAN NOT NULL DEFAULT FALSE;
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS memory_contextualization_jobs (
+            job_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            memory_ids UUID[] NOT NULL,
+            status TEXT NOT NULL DEFAULT 'queued',
+            queued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            started_at TIMESTAMPTZ NULL,
+            completed_at TIMESTAMPTZ NULL,
+            error TEXT NULL,
+            result JSONB NULL
+        );
+        """,
     ]
     for statement in statements:
         cur.execute(statement)
@@ -77,7 +98,7 @@ def create_memory_item(cur, payload: RememberInput) -> MemoryItem:
         """
         INSERT INTO memory_items (kind, content, content_format, metadata, provenance_anchor, occurred_at)
         VALUES (%s, %s, %s, %s, %s, %s)
-        RETURNING memory_id::text, kind, content, content_format, metadata, provenance_anchor, occurred_at, created_at;
+        RETURNING memory_id::text, kind, content, content_format, metadata, provenance_anchor, occurred_at, created_at, contextualized_at, contextualization_skipped;
         """,
         (
             payload.kind,
@@ -109,6 +130,8 @@ def create_memory_item(cur, payload: RememberInput) -> MemoryItem:
         provenance_anchor=item_row["provenance_anchor"],
         occurred_at=item_row["occurred_at"],
         created_at=item_row["created_at"],
+        contextualized_at=item_row.get("contextualized_at"),
+        contextualization_skipped=bool(item_row.get("contextualization_skipped", False)),
     )
 
 
@@ -253,7 +276,9 @@ def get_memory_item_by_id(cur, memory_id: str) -> Optional[Dict[str, Any]]:
             mi.metadata,
             mi.provenance_anchor,
             mi.occurred_at,
-            mi.created_at
+            mi.created_at,
+            mi.contextualized_at,
+            mi.contextualization_skipped
         FROM memory_items mi
         LEFT JOIN memory_sources ms ON ms.memory_id = mi.memory_id
         WHERE mi.memory_id = %s::uuid
@@ -263,3 +288,120 @@ def get_memory_item_by_id(cur, memory_id: str) -> Optional[Dict[str, Any]]:
     )
     row = cur.fetchone()
     return dict(row) if row else None
+
+
+def get_eligible_for_contextualization(cur, n: int) -> List[str]:
+    cur.execute(
+        """
+        SELECT memory_id::text AS memory_id
+        FROM memory_items
+        WHERE contextualized_at IS NULL
+          AND contextualization_skipped = FALSE
+        ORDER BY created_at DESC
+        LIMIT %s;
+        """,
+        (n,),
+    )
+    return [row["memory_id"] for row in cur.fetchall()]
+
+
+def create_contextualization_job(cur, conn, memory_ids: Sequence[str]) -> str:
+    if not memory_ids:
+        return ""
+    cur.execute(
+        """
+        INSERT INTO memory_contextualization_jobs (memory_ids, status)
+        VALUES (%s::uuid[], 'queued')
+        RETURNING job_id::text AS job_id;
+        """,
+        (list(memory_ids),),
+    )
+    row = cur.fetchone()
+    conn.commit()
+    return row["job_id"] if row else str(uuid4())
+
+
+def get_contextualization_job(cur, job_id: str) -> Optional[Dict[str, Any]]:
+    cur.execute(
+        """
+        SELECT
+            job_id::text AS job_id,
+            status,
+            COALESCE(array_length(memory_ids, 1), 0) AS queued_count,
+            queued_at,
+            started_at,
+            completed_at,
+            error,
+            result
+        FROM memory_contextualization_jobs
+        WHERE job_id = %s::uuid
+        LIMIT 1;
+        """,
+        (job_id,),
+    )
+    row = cur.fetchone()
+    return dict(row) if row else None
+
+
+def update_job_status(
+    cur,
+    conn,
+    job_id: str,
+    status: str,
+    *,
+    error: Optional[str] = None,
+    result: Optional[Dict[str, Any]] = None,
+) -> None:
+    started_at_expr = "NOW()" if status == "running" else "started_at"
+    completed_at_expr = "NOW()" if status in {"done", "failed"} else "completed_at"
+    cur.execute(
+        f"""
+        UPDATE memory_contextualization_jobs
+        SET status = %s,
+            started_at = {started_at_expr},
+            completed_at = {completed_at_expr},
+            error = %s,
+            result = COALESCE(%s::jsonb, result)
+        WHERE job_id = %s::uuid;
+        """,
+        (status, error, Json(result) if result is not None else None, job_id),
+    )
+    conn.commit()
+
+
+def set_contextualized_at(cur, conn, memory_id: str) -> None:
+    cur.execute(
+        """
+        UPDATE memory_items
+        SET contextualized_at = NOW(), contextualization_skipped = FALSE
+        WHERE memory_id = %s::uuid;
+        """,
+        (memory_id,),
+    )
+    conn.commit()
+
+
+def set_contextualization_skipped(cur, conn, memory_id: str) -> None:
+    cur.execute(
+        """
+        UPDATE memory_items
+        SET contextualization_skipped = TRUE
+        WHERE memory_id = %s::uuid;
+        """,
+        (memory_id,),
+    )
+    conn.commit()
+
+
+def get_existing_memory_ids(cur, ids: Sequence[str]) -> List[str]:
+    if not ids:
+        return []
+    cur.execute(
+        """
+        SELECT memory_id::text AS memory_id
+        FROM memory_items
+        WHERE memory_id = ANY(%s::uuid[]);
+        """,
+        (list(ids),),
+    )
+    return [row["memory_id"] for row in cur.fetchall()]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 from dataclasses import asdict
 from typing import Callable, Dict, List, Optional, Sequence
@@ -8,6 +9,7 @@ from typing import Callable, Dict, List, Optional, Sequence
 from langchain_openai import AzureOpenAIEmbeddings, OpenAIEmbeddings
 
 from .config import Settings
+from .contextualizer import ContextualizationDispatcher, contextualize_ids, contextualize_n, get_job_status
 from .memory_db import (
     commit,
     create_chunk,
@@ -21,7 +23,16 @@ from .memory_db import (
     recall_by_embedding,
     rollback,
 )
-from .memory_models import ContextBuildInput, ContextBundle, RecallInput, RecallResultItem, RememberInput
+from .memory_models import (
+    ContextBuildInput,
+    ContextBundle,
+    ContextualizeJobResponse,
+    RecallInput,
+    RecallResultItem,
+    RememberInput,
+)
+
+LOG = logging.getLogger(__name__)
 
 
 class MemoryServiceError(Exception):
@@ -48,9 +59,10 @@ class MindStateService:
         self.conn = conn
         self.settings = settings
         self._embedder = embedder
+        self.dispatcher = ContextualizationDispatcher(self.cur, self.conn, self.settings)
         ensure_memory_schema(self.cur, self.conn, self.settings)
 
-    def remember(self, payload: RememberInput) -> Dict[str, object]:
+    def remember(self, payload: RememberInput, contextualize: bool = False) -> Dict[str, object]:
         if not payload.content.strip():
             raise ValidationError("content is required")
         if not payload.kind.strip():
@@ -74,6 +86,15 @@ class MindStateService:
                 )
             self._create_conservative_links(item.memory_id, payload)
             commit(self.conn)
+            should_contextualize = (
+                self.settings.contextualization.enabled
+                and (contextualize or payload.kind in self.settings.contextualization.auto_kinds)
+            )
+            if should_contextualize:
+                try:
+                    self.dispatcher.dispatch([item.memory_id])
+                except Exception as exc:
+                    LOG.exception("Failed to dispatch contextualization for %s: %s", item.memory_id, exc)
             return {
                 "memory": asdict(item),
                 "chunk_count": len(chunks),
@@ -136,6 +157,21 @@ class MindStateService:
         if not memory_id:
             raise ValidationError("memory_id is required")
         return get_memory_item_by_id(self.cur, memory_id)
+
+    def contextualize_n(self, n: int = 1) -> ContextualizeJobResponse:
+        if n < 1:
+            raise ValidationError("n must be >= 1")
+        return contextualize_n(self.cur, self.conn, self.settings, n)
+
+    def contextualize_ids(self, ids: List[str]) -> ContextualizeJobResponse:
+        if not ids:
+            raise ValidationError("ids must not be empty")
+        return contextualize_ids(self.cur, self.conn, self.settings, ids)
+
+    def get_contextualization_job(self, job_id: str) -> Optional[Dict[str, object]]:
+        if not job_id:
+            raise ValidationError("job_id is required")
+        return get_job_status(self.cur, job_id)
 
     def _chunk_text(self, text: str) -> List[str]:
         chunk_size = max(64, self.settings.memory.chunk_size)

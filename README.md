@@ -85,18 +85,16 @@ See the full manual in `REPL-MANUAL.md` for screenshots, examples, tips.
 | `\q` | Quit the REPL |
 | `\log [on \| off]` | Toggle logging of LLM and DB interactions |
 | `\llm [on \|off]` | Toggle LLM usage (off executes Cypher directly) |
-| `\h` | Show this help message |
-
-### TUI-Only Memory Commands
-The higher-level memory workflow is available in the Textual UI (`mstate --tui`), not in the standard REPL (`mstate`).
-
-| Command | Description |
-|---------|-------------|
-| `\mode [shell \| memory]` | Switch between low-level shell workflow and higher-level memory workflow |
-| `\remember KIND \| CONTENT` | Store canonical memory from TUI workflow |
+| `\contextualize [n]` | Queue graph-contextualization for the latest eligible `n` items (default `1`) |
+| `\contextualize --id <UUID>` | Queue graph-contextualization for a specific memory item |
+| `\mode [shell \| memory]` | Switch default input workflow between shell and memory |
+| `\remember KIND \| CONTENT` | Store canonical memory item |
 | `\recall QUERY` | Run ranked semantic memory recall |
 | `\context QUERY` | Build a bounded context bundle |
-| `\inspect MEMORY_ID` | Inspect stored memory content, metadata, and provenance |
+| `\inspect MEMORY_ID` | Inspect stored memory content and metadata |
+| `\h` | Show this help message |
+
+These slash commands are intentionally unified between the standard REPL (`mstate`) and TUI (`mstate --tui`) via a shared command parser.
 
 Quick TUI flow:
 ```bash

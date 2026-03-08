@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from typing import Any, Dict, Generator, List, Optional
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from .config import get_settings
 from .db import connect_db, init_age
@@ -23,6 +23,7 @@ class RememberRequest(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
     provenance_anchor: Optional[str] = None
     occurred_at: Optional[datetime] = None
+    contextualize: bool = False
 
 
 class RememberResponse(BaseModel):
@@ -67,6 +68,37 @@ class ContextBuildResponse(BaseModel):
     provenance_references: List[Dict[str, Any]]
 
 
+class ContextualizeRequest(BaseModel):
+    n: Optional[int] = Field(default=None, ge=1)
+    ids: Optional[List[str]] = None
+
+    @model_validator(mode="after")
+    def validate_exactly_one_mode(self) -> "ContextualizeRequest":
+        has_n = self.n is not None
+        has_ids = self.ids is not None
+        if has_n == has_ids:
+            raise ValueError("exactly one of n or ids must be provided")
+        if self.ids is not None and len(self.ids) == 0:
+            raise ValueError("ids must not be empty")
+        return self
+
+
+class ContextualizeJobResponseModel(BaseModel):
+    job_id: str
+    queued_count: int
+    status: str
+
+
+class ContextualizeJobStatusModel(BaseModel):
+    job_id: str
+    status: str
+    queued_count: int
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    error: Optional[str] = None
+    result: Optional[Dict[str, Any]] = None
+
+
 # Reserved extension-point request models for adjacent first-wave endpoints.
 class MemoryLookupRequest(BaseModel):
     memory_id: str
@@ -103,18 +135,20 @@ def create_app() -> FastAPI:
     @app.post("/v1/memory/remember", response_model=RememberResponse)
     def remember(request: RememberRequest, service: MindStateService = Depends(get_service)) -> RememberResponse:
         try:
-            result = service.remember(
-                RememberInput(
-                    kind=request.kind,
-                    content=request.content,
-                    content_format=request.content_format,
-                    source=request.source,
-                    author=request.author,
-                    metadata=request.metadata,
-                    provenance_anchor=request.provenance_anchor,
-                    occurred_at=request.occurred_at,
-                )
+            payload = RememberInput(
+                kind=request.kind,
+                content=request.content,
+                content_format=request.content_format,
+                source=request.source,
+                author=request.author,
+                metadata=request.metadata,
+                provenance_anchor=request.provenance_anchor,
+                occurred_at=request.occurred_at,
             )
+            try:
+                result = service.remember(payload, contextualize=request.contextualize)
+            except TypeError:
+                result = service.remember(payload)
             return RememberResponse(**result)
         except ValidationError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -175,6 +209,36 @@ def create_app() -> FastAPI:
     @app.post("/v1/memory/related")
     def related_memory(_: RelatedMemoryRequest) -> Dict[str, str]:
         raise HTTPException(status_code=501, detail="reserved extension point")
+
+    @app.post("/v1/memory/contextualize", response_model=ContextualizeJobResponseModel)
+    def contextualize(
+        request: ContextualizeRequest,
+        service: MindStateService = Depends(get_service),
+    ) -> ContextualizeJobResponseModel:
+        try:
+            if request.n is not None:
+                job = service.contextualize_n(request.n)
+            else:
+                job = service.contextualize_ids(request.ids or [])
+            payload = asdict(job) if is_dataclass(job) else dict(vars(job))
+            return ContextualizeJobResponseModel(**payload)
+        except ValidationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.get("/v1/memory/contextualize/{job_id}", response_model=ContextualizeJobStatusModel)
+    def get_contextualize_job(
+        job_id: str,
+        service: MindStateService = Depends(get_service),
+    ) -> ContextualizeJobStatusModel:
+        try:
+            job = service.get_contextualization_job(job_id)
+            if not job:
+                raise HTTPException(status_code=404, detail="job not found")
+            return ContextualizeJobStatusModel(**job)
+        except ValidationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return app
 

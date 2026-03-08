@@ -5,6 +5,7 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
 from langchain_core.messages import AIMessage, HumanMessage
 
+from .commands import CommandParseError, help_text, parse_slash_command
 from .config import get_settings
 from .db import (
     connect_db,
@@ -16,15 +17,8 @@ from .db import (
 )
 from .llm import build_send_cypher_tool, create_agent_executor, create_llm
 from .logging_utils import VerboseCallback, log_print, setup_logging
-
-
-def _parse_toggle(value: str) -> Optional[bool]:
-    val = value.lower()
-    if val in {"on", "true"}:
-        return True
-    if val in {"off", "false"}:
-        return False
-    return None
+from .memory_models import ContextBuildInput, RecallInput, RememberInput
+from .memory_service import MindStateService
 
 
 def main() -> None:
@@ -76,6 +70,7 @@ def main() -> None:
     try:
         try:
             init_age(cur, conn, settings)
+            svc = MindStateService(cur=cur, conn=conn, settings=settings)
             system_prompt = settings.default_system_prompt
             if args.system_prompt:
                 try:
@@ -104,6 +99,7 @@ def main() -> None:
 
         log_enabled = False
         llm_enabled = True
+        workflow_mode = "shell"
 
         if args.files:
             load_and_execute_files(cur, conn, args.files, settings, logger if args.verbose else None)
@@ -149,38 +145,114 @@ def main() -> None:
                     continue
                 if stripped == "\\q":
                     break
-                if stripped == "\\h":
-                    print("Available commands:")
-                    print("  \\q              Quit the REPL")
-                    print("  \\log [on|off]   Toggle logging of LLM and DB interactions")
-                    print("  \\llm [on|off]   Toggle LLM usage (off executes Cypher directly)")
-                    print("  \\h              Show this help message")
-                    continue
-                if stripped.startswith("\\log"):
-                    parts = stripped.split(maxsplit=1)
-                    if len(parts) == 2:
-                        val = _parse_toggle(parts[1])
-                        if val is None:
-                            print("Usage: \\log [on|off|true|false]")
-                        else:
-                            log_enabled = val
-                            state = "enabled" if log_enabled else "disabled"
-                            print(f"Logging {state}.")
-                    else:
-                        print("Usage: \\log [on|off|true|false]")
-                    continue
-                if stripped.startswith("\\llm"):
-                    parts = stripped.split(maxsplit=1)
-                    if len(parts) == 2:
-                        val = _parse_toggle(parts[1])
-                        if val is None:
-                            print("Usage: \\llm [on|off|true|false]")
-                        else:
+                if stripped.startswith("\\"):
+                    try:
+                        cmd = parse_slash_command(stripped)
+                    except CommandParseError as e:
+                        print(str(e))
+                        continue
+                    try:
+                        if cmd.name == "quit":
+                            break
+                        if cmd.name == "help":
+                            print(help_text())
+                            continue
+                        if cmd.name == "log":
+                            log_enabled = cmd.args["enabled"]
+                            print(f"Logging {'enabled' if log_enabled else 'disabled'}.")
+                            continue
+                        if cmd.name == "llm":
+                            val = cmd.args["enabled"]
+                            if val and agent_executor is None:
+                                try:
+                                    callbacks = [VerboseCallback(logger)] if args.verbose else None
+                                    send_cypher_tool = build_send_cypher_tool(
+                                        cur,
+                                        conn,
+                                        settings,
+                                        logger if args.verbose else None,
+                                        is_logging_enabled=lambda: log_enabled,
+                                    )
+                                    llm = create_llm(settings, callbacks=callbacks)
+                                    agent_executor = create_agent_executor(llm, send_cypher_tool, system_prompt)
+                                except Exception as e:
+                                    print(f"LLM initialization error: {e}")
+                                    val = False
                             llm_enabled = val
-                            state = "enabled" if llm_enabled else "disabled"
-                            print(f"LLM {state}.")
-                    else:
-                        print("Usage: \\llm [on|off|true|false]")
+                            print(f"LLM {'enabled' if llm_enabled else 'disabled'}.")
+                            continue
+                        if cmd.name == "contextualize_n":
+                            job = svc.contextualize_n(cmd.args["n"])
+                            print(f"contextualization job queued: job_id={job.job_id or '(none)'} queued_count={job.queued_count}")
+                            continue
+                        if cmd.name == "contextualize_ids":
+                            job = svc.contextualize_ids(cmd.args["ids"])
+                            print(f"contextualization job queued: job_id={job.job_id or '(none)'} queued_count={job.queued_count}")
+                            continue
+                        if cmd.name == "mode":
+                            workflow_mode = cmd.args["mode"]
+                            print(f"Workflow mode set to {workflow_mode}.")
+                            continue
+                        if cmd.name == "remember":
+                            result = svc.remember(
+                                RememberInput(
+                                    kind=cmd.args["kind"],
+                                    content=cmd.args["content"],
+                                    source="repl",
+                                    author="user",
+                                )
+                            )
+                            print(
+                                f"Remembered {cmd.args['kind']} as memory {result['memory']['memory_id']} "
+                                f"({result['chunk_count']} chunk(s))."
+                            )
+                            continue
+                        if cmd.name == "recall":
+                            results = svc.recall(
+                                RecallInput(query=cmd.args["query"], limit=settings.memory.default_recall_limit)
+                            )
+                            if not results:
+                                print("No memory matches found.")
+                            else:
+                                print(f"Top {len(results)} recall result(s):")
+                                for item in results:
+                                    preview = item.content[:120].replace("\n", " ")
+                                    print(f"- {item.memory_id} [{item.kind}] score={item.score:.3f} {preview}")
+                            continue
+                        if cmd.name == "context":
+                            bundle = svc.build_context(
+                                ContextBuildInput(
+                                    query=cmd.args["query"],
+                                    limit=settings.memory.default_recall_limit,
+                                )
+                            )
+                            print(bundle.overview)
+                            print(
+                                f"Supporting items: {len(bundle.supporting_items)} | "
+                                f"Linked records: {len(bundle.linked_records)}"
+                            )
+                            continue
+                        if cmd.name == "inspect":
+                            item = svc.inspect_memory(cmd.args["memory_id"])
+                            if not item:
+                                print(f"Memory {cmd.args['memory_id']} not found.")
+                            else:
+                                preview = str(item.get("content", ""))[:200].replace("\n", " ")
+                                print(
+                                    f"Memory {cmd.args['memory_id']}: kind={item.get('kind')} "
+                                    f"source={item.get('source')} content={preview}"
+                                )
+                            continue
+                    except Exception as e:
+                        print(f"command error: {e}")
+                        continue
+
+                if workflow_mode == "memory":
+                    result = svc.remember(RememberInput(kind="note", content=text, source="repl", author="user"))
+                    print(
+                        f"Remembered note as memory {result['memory']['memory_id']} "
+                        f"({result['chunk_count']} chunk(s))."
+                    )
                     continue
 
                 if llm_enabled:

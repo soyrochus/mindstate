@@ -26,6 +26,7 @@ The TUI SHALL retain all existing functional behaviors without regression:
 - File pre-loading
 - Keyboard bindings
 - Status display (graph name, LLM state, log state)
+- Unified slash-command handling shared with CLI (`\q`, `\h`, `\log`, `\llm`, `\contextualize`, `\mode`, `\remember`, `\recall`, `\context`, `\inspect`)
 
 #### Scenario: TUI launches and accepts input
 - **WHEN** the user runs `mstate --tui`
@@ -38,3 +39,10 @@ The TUI SHALL retain all existing functional behaviors without regression:
 #### Scenario: TUI with preloaded files
 - **WHEN** the user runs `mstate --tui myfile.cypher`
 - **THEN** the file is executed before the TUI opens and results are visible in the output panel
+
+### Requirement: TUI and CLI use a shared slash-command parser
+The TUI SHALL use the same command parser/help metadata as the CLI REPL so command syntax and usage messages remain consistent across both interfaces.
+
+#### Scenario: Shared parse behavior
+- **WHEN** a slash command is entered in both TUI and CLI
+- **THEN** the command is parsed using the same shared module and identical usage guidance is produced for invalid syntax
