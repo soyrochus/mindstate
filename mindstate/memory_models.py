@@ -101,3 +101,48 @@ class ContextualizeJobStatus:
     completed_at: Optional[datetime]
     error: Optional[str]
     result: Optional[Dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class WorkSessionInput:
+    repo: str
+    branch: str
+    task: str
+    summary: str
+    decisions: List[str]
+    resolved_blockers: List[str]
+    files_changed: List[str]
+    next_steps: List[str]
+    source_agent: Optional[str]
+    contextualize_session: bool = False
+
+    def __init__(
+        self,
+        repo: str,
+        branch: str,
+        task: str,
+        summary: str,
+        decisions: Optional[List[str]] = None,
+        resolved_blockers: Optional[List[str]] = None,
+        files_changed: Optional[List[str]] = None,
+        next_steps: Optional[List[str]] = None,
+        source_agent: Optional[str] = None,
+        contextualize_session: bool = False,
+    ):
+        object.__setattr__(self, "repo", repo)
+        object.__setattr__(self, "branch", branch)
+        object.__setattr__(self, "task", task)
+        object.__setattr__(self, "summary", summary)
+        object.__setattr__(self, "decisions", decisions or [])
+        object.__setattr__(self, "resolved_blockers", resolved_blockers or [])
+        object.__setattr__(self, "files_changed", files_changed or [])
+        object.__setattr__(self, "next_steps", next_steps or [])
+        object.__setattr__(self, "source_agent", source_agent)
+        object.__setattr__(self, "contextualize_session", contextualize_session)
+
+
+@dataclass(frozen=True)
+class WorkSessionResult:
+    session_memory_id: str
+    decision_memory_ids: List[str]
+    resolved_blocker_memory_ids: List[str]

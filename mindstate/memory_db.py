@@ -249,16 +249,50 @@ def get_links_for_memory_ids(cur, memory_ids: Iterable[str]) -> List[Dict[str, A
     return [dict(row) for row in cur.fetchall()]
 
 
-def get_recent_decisions(cur, limit: int = 5) -> List[Dict[str, Any]]:
+def get_recent_decisions(cur, limit: int = 5, source: Optional[str] = None) -> List[Dict[str, Any]]:
     cur.execute(
         """
-        SELECT memory_id::text AS memory_id, kind, content, created_at
-        FROM memory_items
-        WHERE kind = 'decision'
-        ORDER BY created_at DESC
+        SELECT
+            mi.memory_id::text AS memory_id,
+            mi.kind,
+            mi.content,
+            mi.created_at,
+            COALESCE(ms.source, NULL) AS source
+        FROM memory_items mi
+        LEFT JOIN memory_sources ms ON ms.memory_id = mi.memory_id
+        WHERE mi.kind = 'decision'
+          AND (%s IS NULL OR ms.source = %s)
+        ORDER BY mi.created_at DESC
         LIMIT %s;
         """,
-        (limit,),
+        (source, source, limit),
+    )
+    return [dict(row) for row in cur.fetchall()]
+
+
+def get_recent_items_by_kind(
+    cur,
+    kind: str,
+    *,
+    source: Optional[str] = None,
+    limit: int = 10,
+) -> List[Dict[str, Any]]:
+    cur.execute(
+        """
+        SELECT
+            mi.memory_id::text AS memory_id,
+            mi.kind,
+            mi.content,
+            mi.created_at,
+            COALESCE(ms.source, NULL) AS source
+        FROM memory_items mi
+        LEFT JOIN memory_sources ms ON ms.memory_id = mi.memory_id
+        WHERE mi.kind = %s
+          AND (%s IS NULL OR ms.source = %s)
+        ORDER BY mi.created_at DESC
+        LIMIT %s;
+        """,
+        (kind, source, source, limit),
     )
     return [dict(row) for row in cur.fetchall()]
 

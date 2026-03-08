@@ -14,6 +14,7 @@ dependencies = [
     "langchain-core>=0.3.74",
     "langchain-openai>=0.3.29",
     "lark>=1.2.2",
+    "mcp>=1.0.0",
     "prompt-toolkit>=3.0.51",
     "psycopg2-binary>=2.9.10",
     "python-dotenv>=1.1.1",
@@ -24,6 +25,7 @@ dependencies = [
 [project.scripts]
 mstate = "mindstate.__main__:_run"
 mstate-api = "mindstate.api:run"
+mstate-mcp = "mindstate.mcp:run"
 
 [tool.uv]
 package = true

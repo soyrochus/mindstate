@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from .config import get_settings
 from .db import connect_db, init_age
-from .memory_models import ContextBuildInput, RecallInput, RememberInput
+from .memory_models import ContextBuildInput, RecallInput, RememberInput, WorkSessionInput
 from .memory_service import EmbeddingUnavailableError, MindStateService, ValidationError
 
 
@@ -97,6 +97,25 @@ class ContextualizeJobStatusModel(BaseModel):
     completed_at: Optional[datetime] = None
     error: Optional[str] = None
     result: Optional[Dict[str, Any]] = None
+
+
+class WorkSessionRequest(BaseModel):
+    repo: str = Field(..., min_length=1)
+    branch: str = Field(..., min_length=1)
+    task: str = Field(..., min_length=1)
+    summary: str = Field(..., min_length=1)
+    decisions: List[str] = Field(default_factory=list)
+    resolved_blockers: List[str] = Field(default_factory=list)
+    files_changed: List[str] = Field(default_factory=list)
+    next_steps: List[str] = Field(default_factory=list)
+    source_agent: Optional[str] = None
+    contextualize_session: bool = False
+
+
+class WorkSessionResponse(BaseModel):
+    session_memory_id: str
+    decision_memory_ids: List[str]
+    resolved_blocker_memory_ids: List[str]
 
 
 # Reserved extension-point request models for adjacent first-wave endpoints.
@@ -239,6 +258,32 @@ def create_app() -> FastAPI:
             return ContextualizeJobStatusModel(**job)
         except ValidationError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/v1/memory/work-session", response_model=WorkSessionResponse)
+    def log_work_session(
+        request: WorkSessionRequest,
+        service: MindStateService = Depends(get_service),
+    ) -> WorkSessionResponse:
+        try:
+            result = service.log_work_session(
+                WorkSessionInput(
+                    repo=request.repo,
+                    branch=request.branch,
+                    task=request.task,
+                    summary=request.summary,
+                    decisions=request.decisions,
+                    resolved_blockers=request.resolved_blockers,
+                    files_changed=request.files_changed,
+                    next_steps=request.next_steps,
+                    source_agent=request.source_agent,
+                    contextualize_session=request.contextualize_session,
+                )
+            )
+            return WorkSessionResponse(**asdict(result))
+        except ValidationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     return app
 

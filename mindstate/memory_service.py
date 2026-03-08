@@ -19,6 +19,7 @@ from .memory_db import (
     ensure_memory_schema,
     get_links_for_memory_ids,
     get_memory_item_by_id,
+    get_recent_items_by_kind,
     get_recent_decisions,
     recall_by_embedding,
     rollback,
@@ -30,6 +31,8 @@ from .memory_models import (
     RecallInput,
     RecallResultItem,
     RememberInput,
+    WorkSessionInput,
+    WorkSessionResult,
 )
 
 LOG = logging.getLogger(__name__)
@@ -75,6 +78,7 @@ class MindStateService:
         try:
             item = create_memory_item(self.cur, payload)
             vectors = self._embed(chunks)
+            contextualization_job_id: Optional[str] = None
             for idx, chunk_text in enumerate(chunks):
                 chunk_id = create_chunk(self.cur, item.memory_id, idx, chunk_text)
                 create_embedding(
@@ -92,13 +96,15 @@ class MindStateService:
             )
             if should_contextualize:
                 try:
-                    self.dispatcher.dispatch([item.memory_id])
+                    job = self.dispatcher.dispatch([item.memory_id])
+                    contextualization_job_id = job.job_id or None
                 except Exception as exc:
                     LOG.exception("Failed to dispatch contextualization for %s: %s", item.memory_id, exc)
             return {
                 "memory": asdict(item),
                 "chunk_count": len(chunks),
                 "embedding_count": len(vectors),
+                "contextualization_job_id": contextualization_job_id,
             }
         except EmbeddingUnavailableError:
             rollback(self.conn)
@@ -172,6 +178,93 @@ class MindStateService:
         if not job_id:
             raise ValidationError("job_id is required")
         return get_job_status(self.cur, job_id)
+
+    def log_work_session(self, payload: WorkSessionInput) -> WorkSessionResult:
+        if not payload.repo.strip():
+            raise ValidationError("repo is required")
+        if not payload.branch.strip():
+            raise ValidationError("branch is required")
+        if not payload.task.strip():
+            raise ValidationError("task is required")
+        if not payload.summary.strip():
+            raise ValidationError("summary is required")
+
+        session_result = self.remember(
+            RememberInput(
+                kind="work_session",
+                content=payload.summary,
+                source=payload.repo,
+                author=payload.source_agent,
+                metadata={
+                    "branch": payload.branch,
+                    "task": payload.task,
+                    "files_changed": payload.files_changed,
+                    "next_steps": payload.next_steps,
+                },
+            ),
+            contextualize=payload.contextualize_session,
+        )
+
+        decision_ids: List[str] = []
+        for decision in payload.decisions:
+            if not decision.strip():
+                continue
+            result = self.remember(
+                RememberInput(
+                    kind="decision",
+                    content=decision,
+                    source=payload.repo,
+                    author=payload.source_agent,
+                    metadata={"branch": payload.branch, "task": payload.task},
+                ),
+                contextualize=False,
+            )
+            decision_ids.append(str(result["memory"]["memory_id"]))
+
+        resolved_blocker_ids: List[str] = []
+        for blocker in payload.resolved_blockers:
+            if not blocker.strip():
+                continue
+            result = self.remember(
+                RememberInput(
+                    kind="resolved_blocker",
+                    content=blocker,
+                    source=payload.repo,
+                    author=payload.source_agent,
+                    metadata={"branch": payload.branch, "task": payload.task},
+                ),
+                contextualize=False,
+            )
+            resolved_blocker_ids.append(str(result["memory"]["memory_id"]))
+
+        return WorkSessionResult(
+            session_memory_id=str(session_result["memory"]["memory_id"]),
+            decision_memory_ids=decision_ids,
+            resolved_blocker_memory_ids=resolved_blocker_ids,
+        )
+
+    def find_related_code(self, repo: str, symbol: str, branch: Optional[str] = None) -> Dict[str, object]:
+        if not repo.strip():
+            raise ValidationError("repo is required")
+        if not symbol.strip():
+            raise ValidationError("symbol is required")
+
+        recalls = self.recall(RecallInput(query=symbol, source=repo, limit=10))
+        decisions = get_recent_decisions(self.cur, limit=5, source=repo)
+        return {"items": [asdict(item) for item in recalls], "decisions": decisions}
+
+    def get_recent_project_state(self, repo: str) -> Dict[str, object]:
+        if not repo.strip():
+            raise ValidationError("repo is required")
+
+        summaries = get_recent_items_by_kind(self.cur, "summary", source=repo, limit=10)
+        decisions = get_recent_items_by_kind(self.cur, "decision", source=repo, limit=10)
+        open_blockers = get_recent_items_by_kind(self.cur, "blocker", source=repo, limit=10)
+        return {
+            "summaries": summaries,
+            "decisions": decisions,
+            "open_blockers": open_blockers,
+        }
 
     def _chunk_text(self, text: str) -> List[str]:
         chunk_size = max(64, self.settings.memory.chunk_size)

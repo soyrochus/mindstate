@@ -70,6 +70,14 @@ class ContextualizationSettings:
 
 
 @dataclass(frozen=True)
+class MCPSettings:
+    transport: str
+    host: str
+    port: int
+    enabled_tools: Optional[frozenset[str]]
+
+
+@dataclass(frozen=True)
 class Settings:
     db: DBSettings
     graph_name: str
@@ -80,6 +88,7 @@ class Settings:
     api: APISettings
     memory: MemorySettings
     contextualization: ContextualizationSettings
+    mcp: MCPSettings
 
     def init_statements(self) -> List[str]:
         return [
@@ -165,6 +174,19 @@ def get_settings() -> Settings:
         max_entities_per_item=int(getenv("MS_CONTEXTUALIZE_MAX_ENTITIES_PER_ITEM", "12")),
     )
 
+    mcp_enabled_tools_raw = os.environ.get("MS_MCP_ENABLED_TOOLS")
+    mcp_enabled_tools = None
+    if mcp_enabled_tools_raw is not None:
+        parsed = {part.strip() for part in mcp_enabled_tools_raw.split(",") if part.strip()}
+        mcp_enabled_tools = frozenset(parsed)
+
+    mcp = MCPSettings(
+        transport=getenv("MS_MCP_TRANSPORT", "stdio").strip().lower() or "stdio",
+        host=getenv("MS_MCP_HOST", "127.0.0.1"),
+        port=int(getenv("MS_MCP_PORT", "8001")),
+        enabled_tools=mcp_enabled_tools,
+    )
+
     return Settings(
         db=db,
         graph_name=getenv("AGE_GRAPH", "mindstate"),
@@ -175,4 +197,5 @@ def get_settings() -> Settings:
         api=api,
         memory=memory,
         contextualization=contextualization,
+        mcp=mcp,
     )

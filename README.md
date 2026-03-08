@@ -3,129 +3,140 @@
 ![Python Version](https://img.shields.io/badge/Python-3.13%2B-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Status](https://img.shields.io/badge/Status-Experimental-orange)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-informational)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18-informational)
 ![Graph Engine](https://img.shields.io/badge/Apache%20AGE-openCypher-purple)
 ![Vectors](https://img.shields.io/badge/pgvector-enabled-blueviolet)
 
-A persistent AI memory substrate that stores knowledge as canonical items and exposes it through cognitive operations — remember, recall, build context — rather than raw storage mechanics.
-
-> **NOTE**: MindState now includes a first behavior-oriented memory layer (`remember`, `recall`, `build_context`) exposed via FastAPI and TUI workflows, while preserving the low-level Cypher/LLM shell.
+MindState is an external memory system for AI-assisted engineering work. It gives coding agents — and you — a shared, inspectable, persistent memory across tools and sessions.
 
 ![Mindstate](./images/mindstate.png)
 
-**Components in this repo**
+---
 
-| Part | What it is | Folder / File |
-|------|------------|---------------|
-| Interactive REPL (LLM + direct Cypher) | Query graph with natural language or raw Cypher | `mindstate/` |
-| Detailed REPL manual | Full feature & usage guide | `REPL-MANUAL.md` |
-| Cypher cheat sheet & how‑to | Quick Cypher reminders | `Cypher Cheat Sheet and How-To Guide.md` |
-| Dockerized Postgres 16 + AGE + pgvector | Single MindState-oriented container | `Dockerfile`, `init-mindstate.sql` |
-| Sample graph init | Optional starting graph | `init_graph.cypher` |
+## The Problem It Solves
 
+Every AI tool keeps its own fragment of context. Claude knows what you discussed in that project. Your coding agent knows what it changed this session. Your notes app knows the decision you wrote down last week. None of them talk to each other. You re-explain everything, constantly.
+
+MindState moves memory outside any single tool — into a store you own — and exposes it through a compact interface that agents and humans can both use. The idea is developed in more depth in: [From Open Brain to MindState: An Experiment in External AI Memory](docs/From%20Open%20Brain%20to%20Mindstate%3A%20An%20Experiment%20in%20External%20AI%20Memory.md).
 
 ---
 
+## What's Inside
 
-## FEATURES
+One application, three interfaces, one data layer:
 
-- Interactive MindState REPL for PostgreSQL/AGE
-- Execute Cypher scripts from files
-- LLM integration for query generation and explanation
-- Behavior-oriented memory API: `POST /v1/memory/remember`, `POST /v1/memory/recall`, `POST /v1/context/build`
-- Higher-level TUI memory workflows (`\\mode memory`, `\\remember`, `\\recall`, `\\context`, `\\inspect`) in `mstate --tui`
-- System prompt customization for LLM
-- Verbose error output for debugging
-- **Colourful Text User Interface (TUI):** Use the `-t` or `--tui` option to launch a modern, colourful Text User Interface for enhanced interaction.
+| Interface | Command | Who uses it |
+| --- | --- | --- |
+| MCP server | `mstate-mcp` | Coding agents (Claude Code, Copilot, Codex) |
+| HTTP API | `mstate-api` | Scripts, services, other integrations |
+| REPL / TUI | `mstate` / `mstate --tui` | You, directly |
 
-*Simple (default) REPL*
-![Simple REPL](images/replsimple.png)
+All three interfaces call the same service layer. There is no MCP-only logic, no API-only logic. Memory written from one interface is immediately visible through all others.
 
-*TUI REPL (using the Textual library)*
-![Simple REPL](images/repltui.png)
+**Data layer:** PostgreSQL 18 + Apache AGE (graph, openCypher) + pgvector (semantic embeddings) — all bundled in one container image.
 
 ---
 
-## Startup Options
+## How Memory Works
 
-The MindState REPL can be started with various options to customize its behavior:
+MindState uses a **two-tier write model**:
 
+**Tier 1 — always, fast, no LLM:** `remember()` stores the item, chunks it, embeds it. RAG is immediately available. No LLM on the write path.
+
+**Tier 2 — optional, async, LLM-assisted:** `contextualize()` extracts entities from the content, resolves them against the knowledge graph, infers typed relations, and writes them to Apache AGE. This enriches the item structurally without blocking the write.
+
+Tier 2 runs in the background. If it fails, the Tier 1 item remains fully searchable. High-value memory kinds (`decision`, `architecture_note`, `resolved_blocker`, `task`, `observation`, `claim`) trigger Tier 2 automatically.
+
+### Memory kinds
+
+The kind of a memory item determines how it is stored, whether it is auto-contextualized, and how it surfaces in retrieval:
+
+| Kind | Auto-contextualized | Typical use |
+| --- | --- | --- |
+| `decision` | Yes | Architectural or design choices |
+| `architecture_note` | Yes | Structural observations about the codebase |
+| `resolved_blocker` | Yes | Problems that were fixed and how |
+| `task` | Yes | Discrete work items |
+| `observation` | Yes | Meaningful discoveries during work |
+| `claim` | Yes | Assertions you want to track |
+| `note` | No | Freeform notes, transient observations |
+| `summary` | No | Work session or topic summaries |
+| `work_session` | No | Structured session logs |
+| `message` | No | Communications or outputs |
+
+---
+
+## The Three Interaction Moments
+
+Agent memory is most useful at three specific moments:
+
+### 1. Start of task — hydrate context
+
+Before starting work, retrieve what's relevant. Don't dump everything — request a bounded context bundle shaped around your task:
+
+```text
+\context implement caching layer for the API
 ```
-positional arguments:
-  files                 Cypher files to load and execute
 
-options:
-  -h, --help            show this help message and exit
-  -e, --execute         Execute files and exit (do not start REPL)
-  -t, --tui             Launch the Textual TUI instead of the standard REPL (shows a colourful Text User Interface)
-  --api                 Run the FastAPI service instead of the REPL
-  --api-host API_HOST   API host bind address
-  --api-port API_PORT   API port
-  -s, --system-prompt SYSTEM_PROMPT
-                        Path to a file containing a system prompt for the LLM
-  -v, --verbose         Enable verbose output (show stack traces on errors)
+or via MCP:
+
+```json
+{ "tool": "build_context", "query": "caching layer", "source": "myrepo", "limit": 10 }
 ```
+
+### 2. During work — write selectively
+
+Not every thought deserves memory. Write decisions, blockers, architectural observations. Skip intermediate reasoning traces.
+
+```text
+\remember decision | Use Redis for session caching — Memcached ruled out due to no pub/sub support
+```
+
+### 3. End of session — log what changed
+
+A structured session record gives future agents state, not fragments:
+
+```json
+{
+  "tool": "log_work_session",
+  "repo": "myrepo",
+  "branch": "feature/caching",
+  "task": "implement API caching",
+  "summary": "Added Redis-backed cache middleware with TTL per endpoint",
+  "decisions": ["Redis over Memcached", "TTL=300s for user endpoints"],
+  "resolved_blockers": ["Connection pool exhaustion fixed by maxconn=20"],
+  "files_changed": ["middleware/cache.py", "config/redis.py"],
+  "next_steps": ["Add cache invalidation on writes", "Load test under burst traffic"]
+}
+```
+
+`log_work_session` stores the session item and automatically creates child `decision` and `resolved_blocker` memory items — each of which triggers graph contextualization.
 
 ---
 
-## REPL Overview (Primary Focus)
+## Quick Start
 
-The MindState REPL lets you:
+### 1. Start the database
 
-* Use plain English (LLM mode) → translated into Cypher and executed
-* Fall back to direct Cypher mode instantly (`\llm off` / `\llm on`)
-* Run multiple Cypher statements in one line (semicolon separated)
-* Auto-detect return columns & format nodes, edges, and paths
-* Persist command history between sessions
-* Optionally log: natural language → generated Cypher → DB results
-
-See the full manual in `REPL-MANUAL.md` for screenshots, examples, tips.
-
-### Key Commands (inline recap)
-| Command |  Description |
-|---------|-------------|
-| `\q` | Quit the REPL |
-| `\log [on \| off]` | Toggle logging of LLM and DB interactions |
-| `\llm [on \|off]` | Toggle LLM usage (off executes Cypher directly) |
-| `\contextualize [n]` | Queue graph-contextualization for the latest eligible `n` items (default `1`) |
-| `\contextualize --id <UUID>` | Queue graph-contextualization for a specific memory item |
-| `\mode [shell \| memory]` | Switch default input workflow between shell and memory |
-| `\remember KIND \| CONTENT` | Store canonical memory item |
-| `\recall QUERY` | Run ranked semantic memory recall |
-| `\context QUERY` | Build a bounded context bundle |
-| `\inspect MEMORY_ID` | Inspect stored memory content and metadata |
-| `\h` | Show this help message |
-
-These slash commands are intentionally unified between the standard REPL (`mstate`) and TUI (`mstate --tui`) via a shared command parser.
-
-Quick TUI flow:
 ```bash
-mstate --tui
-# inside TUI:
-\mode memory
-\remember note | Project alpha ships Friday.
-\recall alpha ships
-\context Prepare Friday release context
+podman build -t mindstate-pg .
+bash run_db_container.sh
 ```
 
-### Quick Examples
-Natural language (LLM mode):
-```
-show all nodes and their relationships
-create a person named Alice who is 30
-find shortest path between Alice and any Button
+The image bundles PostgreSQL 18, Apache AGE, and pgvector. The init script creates the `mindstate` graph and enables both extensions automatically.
+
+### 2. Install
+
+```bash
+uv sync
 ```
 
-Direct Cypher:
-```
-MATCH (n) RETURN n;
-MATCH (n)-[r]->(m) RETURN n, r, m;
-CREATE (p:Person {name: 'Alice', age: 30}) RETURN p;
-```
+### 3. Configure
 
-### Environment Variables (REPL + Memory API)
-Put these in a `.env` (see `example.env`):
-```
+Create `.env` (copy from `example.env`):
+
+```bash
+# Database
 PGHOST=localhost
 PGPORT=5432
 PGDATABASE=postgres
@@ -133,173 +144,241 @@ PGUSER=postgres
 PGPASSWORD=secret
 AGE_GRAPH=mindstate
 
-# LLM (optional – only needed for natural language mode)
+# LLM — required for semantic features and graph contextualization
 OPENAI_API_KEY=your_api_key_here
 OPENAI_MODEL_NAME=gpt-4.1
 OPENAI_TEMPERATURE=0
 
-# API server
+# Embeddings — used by remember() and recall()
+MS_EMBEDDING_PROVIDER=openai          # local | openai | azure_openai
+MS_EMBEDDING_MODEL=text-embedding-3-small
+MS_EMBEDDING_DIMENSIONS=1536
+
+# HTTP API
 MS_API_HOST=127.0.0.1
 MS_API_PORT=8000
 
-# Memory embedding configuration
-MS_EMBEDDING_PROVIDER=openai
-MS_EMBEDDING_MODEL=text-embedding-3-small
-MS_EMBEDDING_DIMENSIONS=1536
+# MCP server
+MS_MCP_TRANSPORT=stdio               # stdio (default) | sse
+MS_MCP_HOST=127.0.0.1               # used only when transport=sse
+MS_MCP_PORT=8001                     # used only when transport=sse
+# MS_MCP_ENABLED_TOOLS=remember,recall,build_context   # restrict tool surface
+
+# Graph contextualization (Tier 2)
+MS_CONTEXTUALIZE_ENABLED=true
+MS_AUTO_CONTEXTUALIZE_KINDS=decision,architecture_note,resolved_blocker,task,observation,claim
+MS_CONTEXTUALIZE_CONFIDENCE_THRESHOLD=0.85
+MS_CONTEXTUALIZE_MERGE_THRESHOLD=0.92
+MS_CONTEXTUALIZE_MAX_ENTITIES_PER_ITEM=12
 ```
 
-### Running the REPL
-Install Python deps (uses `pyproject.toml`). You can use [uv](https://github.com/astral-sh/uv) or plain pip:
+> **No OpenAI key?** Set `MS_EMBEDDING_PROVIDER=local` and `MS_CONTEXTUALIZE_ENABLED=false` for a local-only mode. Recall works with deterministic embeddings (lower quality but no API required).
+
+### 4. Run
+
 ```bash
-# With uv (fast)
-uv sync
+# For agent integration (primary usage)
+uv run mstate-mcp
 
-# Start REPL (LLM mode default)
-mstate
-# or
-python -m mindstate
+# HTTP API
+uv run mstate-api
 
-# Execute files then drop into REPL
-mstate init_graph.cypher
+# Interactive REPL
+uv run mstate
 
-# Execute files only (no REPL)
-mstate -e init_graph.cypher more.cypher
-
-# Run API server
-mstate --api
-# or
-mstate-api
+# Textual TUI
+uv run mstate --tui
 ```
 
-### Memory API quick example
+---
+
+## MCP Server
+
+`mstate-mcp` starts a stdio MCP server. Point any MCP-compatible agent at it:
+
+**Claude Code** — add to `.claude/settings.json` or project settings:
+
+```json
+{
+  "mcpServers": {
+    "mindstate": {
+      "command": "uv",
+      "args": ["run", "mstate-mcp"],
+      "cwd": "/path/to/mindstate"
+    }
+  }
+}
+```
+
+### MCP tools
+
+| Tool | What it does |
+| --- | --- |
+| `remember` | Store a typed memory item. Kind determines auto-contextualization. |
+| `recall` | Semantic search. Returns ranked items with similarity scores. |
+| `build_context` | Fetch a bounded context bundle for a task — summaries, decisions, related items. |
+| `contextualize` | Trigger graph enrichment for recent or specific items. |
+| `log_work_session` | Store a structured work session with child decisions and resolved blockers. |
+| `find_related_code` | Repo-scoped semantic + decision lookup for a symbol, path, or concept. |
+| `get_recent_project_state` | Latest summaries, decisions, and open blockers for a repo. |
+
+### Tool examples
+
+**Store a decision:**
+
+```json
+{
+  "tool": "remember",
+  "kind": "decision",
+  "content": "Use connection pooling via pgbouncer in production — direct connections exhausted under load",
+  "source": "myrepo",
+  "source_agent": "claude-code"
+}
+```
+
+→ Returns `memory_id` and `contextualization_job_id` (auto-triggered because `decision` is in `AUTO_CONTEXTUALIZE_KINDS`).
+
+**Retrieve context before starting a task:**
+
+```json
+{ "tool": "build_context", "query": "auth middleware session handling", "source": "myrepo" }
+```
+
+→ Returns overview, ranked supporting items, linked decisions, provenance references.
+
+**Trigger graph enrichment manually:**
+
+```json
+{ "tool": "contextualize", "n": 5 }
+```
+
+→ Queues the 5 most recent un-contextualized items. Returns `job_id` immediately.
+
+---
+
+## HTTP API
+
 ```bash
-curl -X POST http://127.0.0.1:8000/v1/memory/remember \
+uv run mstate-api
+# → http://127.0.0.1:8000
+# → http://127.0.0.1:8000/docs  (Swagger UI)
+```
+
+### Endpoints
+
+| Method | Path | What |
+| --- | --- | --- |
+| `POST` | `/v1/memory/remember` | Store memory item |
+| `POST` | `/v1/memory/recall` | Semantic search |
+| `POST` | `/v1/context/build` | Build context bundle |
+| `POST` | `/v1/memory/contextualize` | Queue contextualization job |
+| `GET` | `/v1/memory/contextualize/{job_id}` | Poll job status |
+| `POST` | `/v1/memory/work-session` | Store structured work session |
+
+**Example — log a work session:**
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/memory/work-session \
   -H "Content-Type: application/json" \
-  -d '{"kind":"note","content":"Project alpha ships Friday.","source":"meeting"}'
-
-curl -X POST http://127.0.0.1:8000/v1/memory/recall \
-  -H "Content-Type: application/json" \
-  -d '{"query":"alpha ships","limit":5}'
-
-curl -X POST http://127.0.0.1:8000/v1/context/build \
-  -H "Content-Type: application/json" \
-  -d '{"query":"Prepare Friday release context","limit":5}'
+  -d '{
+    "repo": "myrepo",
+    "branch": "main",
+    "task": "implement auth",
+    "summary": "Added JWT middleware and role-based access checks",
+    "decisions": ["Use JWT access tokens, 1h TTL"],
+    "resolved_blockers": ["Redis connection pool exhaustion fixed"]
+  }'
 ```
-
-For advanced usage, read: `REPL-MANUAL.md`  
-For Cypher syntax help: `Cypher Cheat Sheet and How-To Guide.md`
 
 ---
 
-## Dockerized MindState (Postgres + AGE + pgvector)
+## REPL and TUI
 
-The provided `Dockerfile` builds a single image bundling:
-* PostgreSQL 16
-* Apache AGE (openCypher property graph)
-* pgvector (vector similarity search)
+The REPL and TUI share the same slash-command parser.
 
-Initialization script: `init-mindstate.sql` (creates extensions + a default graph `mindstate`).
-
-### Build & Run
 ```bash
-docker build -t mindstate-pg:latest .
-docker run -d \
-  --name mindstate \
-  -e POSTGRES_PASSWORD=secret \
-  -p 5432:5432 \
-  mindstate-pg:latest
+uv run mstate        # CLI REPL
+uv run mstate --tui  # Textual TUI
 ```
 
-Defaults:
-* Host: `localhost:5432`
-* User: `postgres`
-* Password: `secret`
-* DB: `postgres`
-* Graph created at init: `mindstate`
+### Slash commands
 
-### Verify Extensions
-```bash
-psql -h localhost -U postgres -d postgres
-\dx   # should list age + vector
+| Command | What |
+| --- | --- |
+| `\h` | Help — list all commands |
+| `\q` | Quit |
+| `\mode shell` | Default mode: natural language / Cypher queries via LLM |
+| `\mode memory` | Auto-store every line you type as a `note` memory item |
+| `\remember KIND \| CONTENT` | Store a specific memory item |
+| `\recall QUERY` | Semantic search |
+| `\context QUERY` | Build context bundle for a task |
+| `\contextualize [n]` | Contextualize the n most recent items (default 1) |
+| `\contextualize --id UUID` | Contextualize a specific item |
+| `\inspect MEMORY_ID` | Show full detail for a stored item |
+| `\llm [on\|off]` | Toggle LLM-assisted mode |
+| `\log [on\|off]` | Toggle SQL query logging |
+
+### Workflow example
+
+```text
+mstate> \context implement caching layer
+→ Overview: Context built for 'implement caching layer' using 4 supporting memory item(s).
+  [shows recent decisions, related notes, provenance]
+
+mstate> \remember decision | Use Redis for session caching — TTL 300s per endpoint
+→ Stored memory:abc123  (contextualization job queued)
+
+mstate> \contextualize 3
+→ Queued 3 items  job_id:xyz789
+
+mstate> \recall Redis connection
+→ [ranked results with similarity scores]
 ```
 
-### Simple Graph & Vector Checks
-Create a node:
-```sql
-SELECT * FROM cypher('mindstate', $$CREATE (n:Person {name: 'Alice', age: 30}) RETURN n$$) AS (n agtype);
-```
-Vector table:
-```sql
-CREATE TABLE embeddings (
-  id serial PRIMARY KEY,
-  content text,
-  embedding vector(1536)
-);
-```
-Similarity search:
-```sql
-SELECT * FROM embeddings ORDER BY embedding <-> '[0.1,0.2,0.3]' LIMIT 1;
-```
+**Screenshots:**
 
-### Using with the REPL
-Once the container is running, ensure your `.env` matches the exposed credentials, then start the REPL. Natural language queries will be rewritten into Cypher targeting the configured graph.
+*CLI REPL*
+![Simple REPL](images/replsimple.png)
+
+*Textual TUI*
+![TUI REPL](images/repltui.png)
 
 ---
 
-## Python Access (Outside the REPL)
-```python
-import psycopg2
+## Project Layout
 
-conn = psycopg2.connect(
-    host="localhost", port=5432,
-    user="postgres", password="secret", dbname="postgres"
-)
-cur = conn.cursor()
+```text
+mindstate/          Core application
+  mcp/              MCP server and tool adapters
+  memory_service.py Service layer (MindStateService)
+  memory_db.py      Database operations
+  memory_models.py  Input/output data models
+  contextualizer.py Graph contextualization pipeline
+  api.py            FastAPI HTTP interface
+  cli.py            REPL / TUI entry point
+  config.py         Settings and environment variables
 
-# Raw Cypher via AGE
-q = "MATCH (p:Person) RETURN p"
-cur.execute("SELECT * FROM cypher(%s, %s) AS (p agtype);", ("mindstate", q))
-print(cur.fetchall())
-
-# Vector similarity
-cur.execute(
-    "SELECT content FROM embeddings ORDER BY embedding <-> %s LIMIT 1",
-    ([0.12, 0.04, 0.33],)
-)
-print(cur.fetchone())
+tests/              Unit and integration tests
+openspec/           Spec-driven change artifacts (design docs, specs, tasks)
+docs/               Design notes and background reading
+Dockerfile          PostgreSQL 18 + AGE + pgvector image
 ```
 
 ---
 
-## Project Structure (Abbrev.)
-```
-mindstate/        # REPL implementation (CLI, db, LLM integration, formatting)
-Dockerfile        # Builds Postgres+AGE+pgvector image
-init-mindstate.sql # Enables extensions & creates graph
-init_graph.cypher # Sample Cypher to preload data
-example.env       # Template env vars
-REPL-MANUAL.md    # Full REPL manual
-Cypher Cheat Sheet and How-To Guide.md
-```
-
-
----
 ## Principles of Participation
 
-Everyone is invited and welcome to contribute: open issues, propose pull requests, share ideas, or help improve documentation.  
-Participation is open to all, regardless of background or viewpoint.  
+Everyone is welcome: open issues, propose pull requests, share ideas, improve docs.
+Participation is open to all, regardless of background or viewpoint.
 
-This project follows the [FOSS Pluralism Manifesto](./FOSS_PLURALISM_MANIFESTO.md),  
-which affirms respect for people, freedom to critique ideas, and space for diverse perspectives.  
+This project follows the [FOSS Pluralism Manifesto](./FOSS_PLURALISM_MANIFESTO.md), which affirms respect for people, freedom to critique ideas, and space for diverse perspectives.
 
+---
 
 ## License and Copyright
 
-Copyright (c) 2025,2026 Iwan van der Kleijn
+Copyright (c) 2025, 2026 Iwan van der Kleijn
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+Licensed under the MIT License. See [LICENSE](LICENSE) for details.
 
-## Attribution & Notes
-All bundled components (PostgreSQL, Apache AGE, pgvector) are open source. This repo glues them together for a smooth graph + vector + LLM exploration workflow.
-
-If you build something interesting with this, let me know or open a PR to showcase examples.
+Components: PostgreSQL, Apache AGE, and pgvector are open source and bundled here for a smooth graph + vector + LLM memory workflow. If you build something interesting with this, open a PR or file an issue to share it.
