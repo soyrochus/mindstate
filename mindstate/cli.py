@@ -30,7 +30,7 @@ def _parse_toggle(value: str) -> Optional[bool]:
 def main() -> None:
     settings = get_settings()
 
-    parser = argparse.ArgumentParser(description="Cypher REPL for AGE/PostgreSQL")
+    parser = argparse.ArgumentParser(description="MindState for AGE/PostgreSQL")
     parser.add_argument("files", nargs="*", help="Cypher files to load and execute")
     parser.add_argument("-e", "--execute", action="store_true", help="Execute files and exit (do not start REPL)")
     parser.add_argument("-t", "--tui", action="store_true", help="Launch the Textual TUI instead of the standard REPL")
@@ -40,7 +40,7 @@ def main() -> None:
 
     logger = setup_logging(args.verbose)
 
-    print(f"Cypher REPL for AGE/PostgreSQL - graph: {settings.graph_name}")
+    print(f"MindState for AGE/PostgreSQL - graph: {settings.graph_name}")
 
     # Validate LLM provider configuration early
     try:
@@ -133,7 +133,7 @@ def main() -> None:
 
         while True:
             try:
-                text = session.prompt("cypher> ")
+                text = session.prompt("mstate> ")
                 stripped = text.strip()
                 if not stripped:
                     continue

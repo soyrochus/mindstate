@@ -19,9 +19,9 @@ DB_PARAMS = {
     "user": getenv("PGUSER", "postgres"),
     "password": getenv("PGPASSWORD", ""),
 }
-GRAPH_NAME = getenv("AGE_GRAPH", "demo")
+GRAPH_NAME = getenv("AGE_GRAPH", "mindstate")
 DEFAULT_COLS = "(result agtype)"
-HISTORY_FILE = os.path.expanduser("~/.cypher_repl_history")
+HISTORY_FILE = os.path.expanduser("~/.mstate_history")
 
 INIT_STATEMENTS = [
     "CREATE EXTENSION IF NOT EXISTS age;",
@@ -69,7 +69,7 @@ def load_and_execute_files(cur, conn, files):
             
             for i, stmt in enumerate(statements, 1):
                 print(f"\nStatement {i}:")
-                print(f"cypher> {stmt}")
+                print(f"mstate> {stmt}")
                 execute_cypher(cur, conn, stmt)
                 
         except FileNotFoundError:
@@ -78,14 +78,14 @@ def load_and_execute_files(cur, conn, files):
             print(f"Error reading file '{file_path}': {e}")
 
 def main():
-    parser = argparse.ArgumentParser(description='Cypher REPL for AGE/PostgreSQL')
+    parser = argparse.ArgumentParser(description='MindState for AGE/PostgreSQL')
     parser.add_argument('files', nargs='*', help='Cypher files to load and execute')
     parser.add_argument('-e', '--execute', action='store_true', 
                        help='Execute files and exit (do not start REPL)')
     
     args = parser.parse_args()
     
-    print(f"Cypher REPL for AGE/PostgreSQL - graph: {GRAPH_NAME}")
+    print(f"MindState for AGE/PostgreSQL - graph: {GRAPH_NAME}")
     
     conn = psycopg2.connect(**DB_PARAMS)
     cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -120,7 +120,7 @@ def main():
 
         while True:
             try:
-                text = session.prompt("cypher> ")
+                text = session.prompt("mstate> ")
                 if text.strip() == "\\q":
                     break
                 if not text.strip():

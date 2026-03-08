@@ -1,5 +1,9 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
-name = "tristore"
+name = "mindstate"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -14,6 +18,15 @@ dependencies = [
     "python-dotenv>=1.1.1",
     "textual>=5.3.0",
 ]
+
+[project.scripts]
+mstate = "mindstate.__main__:_run"
+
+[tool.uv]
+package = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["mindstate"]
 
 [dependency-groups]
 dev = [

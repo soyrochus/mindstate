@@ -29,9 +29,9 @@ DB_PARAMS = {
     "user": getenv("PGUSER", "postgres"),
     "password": getenv("PGPASSWORD", ""),
 }
-GRAPH_NAME = getenv("AGE_GRAPH", "demo")
+GRAPH_NAME = getenv("AGE_GRAPH", "mindstate")
 DEFAULT_COLS = "(result agtype)"
-HISTORY_FILE = os.path.expanduser("~/.cypher_repl_history")
+HISTORY_FILE = os.path.expanduser("~/.mstate_history")
 
 # -------- Ultra-tight system prompt (pure Cypher, no SQL) --------
 DEFAULT_SYSTEM_PROMPT = """
@@ -288,7 +288,7 @@ def load_and_execute_files(cur, conn, files, logger: Optional[logging.Logger] = 
             statements = [stmt.strip() for stmt in content.split(';') if stmt.strip()]
             for i, stmt in enumerate(statements, 1):
                 print(f"\nStatement {i}:")
-                print(f"cypher> {stmt}")
+                print(f"mstate> {stmt}")
                 execute_cypher(cur, conn, stmt, logger)
         except FileNotFoundError:
             print(f"Error: File '{file_path}' not found")
@@ -296,7 +296,7 @@ def load_and_execute_files(cur, conn, files, logger: Optional[logging.Logger] = 
             print(f"Error reading file '{file_path}': {e}")
 
 def main():
-    parser = argparse.ArgumentParser(description="Cypher REPL for AGE/PostgreSQL")
+    parser = argparse.ArgumentParser(description="MindState for AGE/PostgreSQL")
     parser.add_argument("files", nargs="*", help="Cypher files to load and execute")
     parser.add_argument("-e", "--execute", action="store_true", help="Execute files and exit (do not start REPL)")
     parser.add_argument("-s", "--system-prompt", help="Path to a file containing a system prompt for the LLM")
@@ -313,7 +313,7 @@ def main():
     if args.verbose:
         logger.debug("Verbose logging enabled")
 
-    print(f"Cypher REPL for AGE/PostgreSQL - graph: {GRAPH_NAME}")
+    print(f"MindState for AGE/PostgreSQL - graph: {GRAPH_NAME}")
 
     # Validate LLM provider configuration early
     try:
@@ -450,7 +450,7 @@ def main():
         chat_history = []
         while True:
             try:
-                text = session.prompt("cypher> ")
+                text = session.prompt("mstate> ")
                 stripped = text.strip()
                 if not stripped:
                     continue

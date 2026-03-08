@@ -125,10 +125,9 @@ def load_and_execute_files(cur, conn, files, settings: Settings, logger=None) ->
             statements = [stmt.strip() for stmt in content.split(";") if stmt.strip()]
             for i, stmt in enumerate(statements, 1):
                 print(f"\nStatement {i}:")
-                print(f"cypher> {stmt}")
+                print(f"mstate> {stmt}")
                 execute_cypher(cur, conn, stmt, settings, logger)
         except FileNotFoundError:
             print(f"Error: File '{file_path}' not found")
         except Exception as e:
             print(f"Error reading file '{file_path}': {e}")
-

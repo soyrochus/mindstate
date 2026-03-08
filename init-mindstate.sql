@@ -1,7 +1,7 @@
 -- Enable pgvector in all new databases
 CREATE EXTENSION IF NOT EXISTS vector;
 
--- Enable Apache AGE and create a sample graph (graph name: my_graph)
+-- Enable Apache AGE and create a sample graph (graph name: mindstate)
 CREATE EXTENSION IF NOT EXISTS age;
 LOAD 'age';
 
@@ -9,4 +9,4 @@ LOAD 'age';
 SET search_path = ag_catalog, "$user", public;
 
 -- Now create the AGE catalog and graph
-SELECT * FROM create_graph('my_graph');
+SELECT * FROM create_graph('mindstate');

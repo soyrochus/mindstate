@@ -63,7 +63,7 @@ class Settings:
 
 
 DEFAULT_SYSTEM_PROMPT = (
-    "You are a Cypher agent for an AGE/PostgreSQL graph database. "
+    "You are a MindState agent for an AGE/PostgreSQL graph database. "
     "You have one tool: send_cypher(query).\n\n"
     "When to call the tool:\n"
     "- The user asks to show/run/find/create/update/delete data, or to count/filter/analyze data stored in the graph.\n\n"
@@ -103,10 +103,9 @@ def get_settings() -> Settings:
 
     return Settings(
         db=db,
-        graph_name=getenv("AGE_GRAPH", "demo"),
+        graph_name=getenv("AGE_GRAPH", "mindstate"),
         default_cols="(result agtype)",
-        history_file=os.path.expanduser("~/.cypher_repl_history"),
+        history_file=os.path.expanduser("~/.mstate_history"),
         default_system_prompt=DEFAULT_SYSTEM_PROMPT.strip(),
         llm=llm,
     )
-

@@ -26,7 +26,7 @@ def setup_logging(verbose: bool) -> logging.Logger:
         for noisy in ["openai", "httpx", "urllib3", "langchain", "langchain_openai"]:
             logging.getLogger(noisy).setLevel(logging.WARNING)
 
-    logger = logging.getLogger("cypherrepl")
+    logger = logging.getLogger("mindstate")
     if verbose:
         logger.debug("Verbose logging enabled")
     return logger

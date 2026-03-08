@@ -1,4 +1,4 @@
-# TriStore Cypher LLM REPL
+# MindState
 
 ![Python Version](https://img.shields.io/badge/Python-3.13%2B-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
@@ -7,18 +7,18 @@
 ![Graph Engine](https://img.shields.io/badge/Apache%20AGE-openCypher-purple)
 ![Vectors](https://img.shields.io/badge/pgvector-enabled-blueviolet)
 
-Natural‑language & Cypher exploration of a PostgreSQL "TriStore" (Relational + Graph + Vectors) powered by Apache AGE and pgvector.
+A persistent AI memory substrate that stores knowledge as canonical items and exposes it through cognitive operations — remember, recall, build context — rather than raw storage mechanics.
 
-> **NOTE**: The current implementation concentrates on interactive exploration of the graph / vector store layer (PostgreSQL + Apache AGE via Cypher). Planned extensions include integrated embedding generation and additional "noSQL" style document / key-value context features to evolve this into a broader multi‑modal context engineering tool.
+> **NOTE**: The current implementation is the low-level foundation: a direct `mstate` shell against the PostgreSQL/AGE/pgvector substrate, supporting Cypher execution, LLM-assisted natural language queries, and interactive REPL and TUI modes. Higher-level memory behaviors (capture, recall, context assembly, MCP tools) are planned as the next layer on top of this base.
 
 **Components in this repo**
 
 | Part | What it is | Folder / File |
 |------|------------|---------------|
-| Interactive REPL (LLM + direct Cypher) - 2 versions | Query graph with natural language or raw Cypher | `cypher_llm_repl.py`, `cypherrepl/` |
+| Interactive REPL (LLM + direct Cypher) | Query graph with natural language or raw Cypher | `mindstate/` |
 | Detailed REPL manual | Full feature & usage guide | `REPL-MANUAL.md` |
 | Cypher cheat sheet & how‑to | Quick Cypher reminders | `Cypher Cheat Sheet and How-To Guide.md` |
-| Dockerized Postgres 16 + AGE + pgvector | Single container tri-store | `Dockerfile`, `init-tristore.sql` |
+| Dockerized Postgres 16 + AGE + pgvector | Single MindState-oriented container | `Dockerfile`, `init-mindstate.sql` |
 | Sample graph init | Optional starting graph | `init_graph.cypher` |
 
 
@@ -27,7 +27,7 @@ Natural‑language & Cypher exploration of a PostgreSQL "TriStore" (Relational +
 
 ## FEATURES
 
-- Interactive Cypher REPL for PostgreSQL/AGE
+- Interactive MindState REPL for PostgreSQL/AGE
 - Execute Cypher scripts from files
 - LLM integration for query generation and explanation
 - System prompt customization for LLM
@@ -44,7 +44,7 @@ Natural‑language & Cypher exploration of a PostgreSQL "TriStore" (Relational +
 
 ## Startup Options
 
-The Cypher REPL can be started with various options to customize its behavior:
+The MindState REPL can be started with various options to customize its behavior:
 
 ```
 positional arguments:
@@ -63,7 +63,7 @@ options:
 
 ## REPL Overview (Primary Focus)
 
-The Cypher LLM REPL lets you:
+The MindState REPL lets you:
 
 * Use plain English (LLM mode) → translated into Cypher and executed
 * Fall back to direct Cypher mode instantly (`\llm off` / `\llm on`)
@@ -105,7 +105,7 @@ PGPORT=5432
 PGDATABASE=postgres
 PGUSER=postgres
 PGPASSWORD=secret
-AGE_GRAPH=demo
+AGE_GRAPH=mindstate
 
 # LLM (optional – only needed for natural language mode)
 OPENAI_API_KEY=your_api_key_here
@@ -120,17 +120,15 @@ Install Python deps (uses `pyproject.toml`). You can use [uv](https://github.com
 uv sync
 
 # Start REPL (LLM mode default)
-python cypher_llm_repl.py
-
-or the refactored version
-
-python -m cypherrepl
+mstate
+# or
+python -m mindstate
 
 # Execute files then drop into REPL
-python -m cypherrepl init_graph.cypher
+mstate init_graph.cypher
 
 # Execute files only (no REPL)
-python -m cypherrepl -e init_graph.cypher more.cypher
+mstate -e init_graph.cypher more.cypher
 ```
 
 For advanced usage, read: `REPL-MANUAL.md`  
@@ -138,23 +136,23 @@ For Cypher syntax help: `Cypher Cheat Sheet and How-To Guide.md`
 
 ---
 
-## Dockerized TriStore (Postgres + AGE + pgvector)
+## Dockerized MindState (Postgres + AGE + pgvector)
 
 The provided `Dockerfile` builds a single image bundling:
 * PostgreSQL 16
 * Apache AGE (openCypher property graph)
 * pgvector (vector similarity search)
 
-Initialization script: `init-tristore.sql` (creates extensions + a default graph `my_graph`).
+Initialization script: `init-mindstate.sql` (creates extensions + a default graph `mindstate`).
 
 ### Build & Run
 ```bash
-docker build -t tristore-pg:latest .
+docker build -t mindstate-pg:latest .
 docker run -d \
-  --name tristore \
+  --name mindstate \
   -e POSTGRES_PASSWORD=secret \
   -p 5432:5432 \
-  tristore-pg:latest
+  mindstate-pg:latest
 ```
 
 Defaults:
@@ -162,7 +160,7 @@ Defaults:
 * User: `postgres`
 * Password: `secret`
 * DB: `postgres`
-* Graph created at init: `my_graph`
+* Graph created at init: `mindstate`
 
 ### Verify Extensions
 ```bash
@@ -205,7 +203,7 @@ cur = conn.cursor()
 
 # Raw Cypher via AGE
 q = "MATCH (p:Person) RETURN p"
-cur.execute("SELECT * FROM cypher(%s, %s) AS (p agtype);", ("my_graph", q))
+cur.execute("SELECT * FROM cypher(%s, %s) AS (p agtype);", ("mindstate", q))
 print(cur.fetchall())
 
 # Vector similarity
@@ -220,10 +218,9 @@ print(cur.fetchone())
 
 ## Project Structure (Abbrev.)
 ```
-cypherrepl/       # REPL implementation (CLI, db, LLM integration, formatting)
-cypher_llm_repl.py# Entry script
+mindstate/        # REPL implementation (CLI, db, LLM integration, formatting)
 Dockerfile        # Builds Postgres+AGE+pgvector image
-init-tristore.sql # Enables extensions & creates graph
+init-mindstate.sql # Enables extensions & creates graph
 init_graph.cypher # Sample Cypher to preload data
 example.env       # Template env vars
 REPL-MANUAL.md    # Full REPL manual
@@ -255,7 +252,6 @@ which affirms respect for people, freedom to critique ideas, and space for diver
 Copyright (c) 2025,2026 Iwan van der Kleijn
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
----
 
 ## Attribution & Notes
 All bundled components (PostgreSQL, Apache AGE, pgvector) are open source. This repo glues them together for a smooth graph + vector + LLM exploration workflow.

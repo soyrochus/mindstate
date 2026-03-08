@@ -1,14 +1,14 @@
-# TriStore — Technical Architecture
+# MindState — Technical Architecture
 
 ## Table of Contents
 
 1. [Overview](#1-overview)
 2. [Repository Layout](#2-repository-layout)
-3. [Infrastructure Layer — The TriStore Database](#3-infrastructure-layer--the-tristore-database)
+3. [Infrastructure Layer — The MindState Database](#3-infrastructure-layer--the-mindstate-database)
    - 3.1 [Docker Image](#31-docker-image)
    - 3.2 [Initialization](#32-initialization)
    - 3.3 [Three Storage Modalities](#33-three-storage-modalities)
-4. [Python Package — `cypherrepl`](#4-python-package--cypherrepl)
+4. [Python Package — `mindstate`](#4-python-package--mindstate)
    - 4.1 [Entry Points](#41-entry-points)
    - 4.2 [Module Map](#42-module-map)
 5. [Configuration Subsystem (`config.py`)](#5-configuration-subsystem-configpy)
@@ -41,7 +41,7 @@
     - 10.3 [REPL Loop](#103-repl-loop)
     - 10.4 [Command Dispatch](#104-command-dispatch)
 11. [TUI Interface (`tui.py`)](#11-tui-interface-tuipy)
-    - 11.1 [Architecture of `CypherReplTUI`](#111-architecture-of-cypherrepltui)
+    - 11.1 [Architecture of `MindStateTUI`](#111-architecture-of-mindstatetui)
     - 11.2 [Layout and Widgets](#112-layout-and-widgets)
     - 11.3 [Input Handling](#113-input-handling)
     - 11.4 [Command History](#114-command-history)
@@ -59,7 +59,7 @@
 
 ## 1. Overview
 
-TriStore is a tool for natural-language and direct Cypher exploration of a PostgreSQL database that exposes three storage modalities at once:
+MindState is a tool for natural-language and direct Cypher exploration of a PostgreSQL database that exposes three storage modalities at once:
 
 | Modality | Technology | Purpose |
 |----------|-----------|---------|
@@ -67,7 +67,7 @@ TriStore is a tool for natural-language and direct Cypher exploration of a Postg
 | **Graph** | Apache AGE (openCypher) | Property graph nodes, edges, paths |
 | **Vectors** | pgvector | Embedding storage & similarity search |
 
-The REPL front-end sits on top of this "TriStore" and exposes two query modes:
+The REPL front-end sits on top of this "MindState" and exposes two query modes:
 
 - **LLM Mode** — the user types natural language; an LLM agent translates it into Cypher and executes it via a bound tool.
 - **Direct Mode** — the user types Cypher directly, bypassing the LLM entirely.
@@ -82,13 +82,14 @@ Two front-ends share the same back-end logic:
 ## 2. Repository Layout
 
 ```
-tristore/
-├── cypher_llm_repl.py        # Legacy monolith (single-file version of the REPL)
-├── cypher_repl.py            # (Unused / earlier prototype)
+mindstate/
+├── deprecated/               # Legacy monolith/prototype scripts (historical)
+│   ├── legacy monolith script
+│   └── earlier prototype script
 │
-├── cypherrepl/               # Primary refactored package
+├── mindstate/               # Primary refactored package
 │   ├── __init__.py           # Version declaration (0.1.0), public API
-│   ├── __main__.py           # `python -m cypherrepl` entry point
+│   ├── __main__.py           # `python -m mindstate` entry point
 │   ├── cli.py                # Standard terminal REPL (prompt_toolkit)
 │   ├── tui.py                # Textual TUI REPL
 │   ├── config.py             # Settings dataclasses + env-var loading
@@ -98,7 +99,7 @@ tristore/
 │   └── logging_utils.py      # Logging setup, VerboseCallback, log sink
 │
 ├── Dockerfile                # Builds Postgres 16 + AGE + pgvector image
-├── init-tristore.sql         # SQL run at container init (enables extensions)
+├── init-mindstate.sql         # SQL run at container init (enables extensions)
 ├── init_graph.cypher         # Optional starter graph data
 ├── init_graph.sql            # SQL variant of starter graph
 ├── example.env               # Template environment file
@@ -113,7 +114,7 @@ tristore/
 
 ---
 
-## 3. Infrastructure Layer — The TriStore Database
+## 3. Infrastructure Layer — The MindState Database
 
 ### 3.1 Docker Image
 
@@ -131,7 +132,7 @@ The initialization SQL script is placed in `/docker-entrypoint-initdb.d/` so Pos
 
 ### 3.2 Initialization
 
-[init-tristore.sql](init-tristore.sql) runs once when the container is first created:
+[init-mindstate.sql](init-mindstate.sql) runs once when the container is first created:
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;      -- pgvector
@@ -166,20 +167,20 @@ Standard PostgreSQL tables and SQL queries run unmodified alongside graph and ve
 
 ---
 
-## 4. Python Package — `cypherrepl`
+## 4. Python Package — `mindstate`
 
 ### 4.1 Entry Points
 
 | Entry point | How invoked | What it runs |
 |-------------|-------------|--------------|
 | `python cypher_llm_repl.py` | Direct script | Legacy monolith `main()` |
-| `python -m cypherrepl` | Module | `cypherrepl.__main__._run()` → `cli.main()` |
-| `python -m cypherrepl -t` | Module + flag | `cli.main()` → `tui.run_tui()` |
+| `python -m mindstate` | Module | `mindstate.__main__._run()` → `cli.main()` |
+| `python -m mindstate -t` | Module + flag | `cli.main()` → `tui.run_tui()` |
 
 ### 4.2 Module Map
 
 ```
-cypherrepl/
+mindstate/
 │
 ├── config.py          ← Settings (pure data, no I/O side effects beyond load_dotenv)
 │
@@ -221,7 +222,7 @@ Settings
 │
 ├── graph_name          → AGE graph to query
 ├── default_cols        → "(result agtype)"  (fallback column def for AGE)
-├── history_file        → "~/.cypher_repl_history"
+├── history_file        → "~/.mstate_history"
 ├── default_system_prompt
 └── init_statements()   → List[str]  (SQL to run at session start)
 ```
@@ -302,7 +303,7 @@ parse_return_clause()             infer column definitions from RETURN clause
         │
         ▼
 BUILD SQL:
-  SELECT * FROM cypher('<graph>', $$ <cypher> $$) AS <col_def>;
+  SELECT * FROM cypher('<graph>', $$ <mstate> $$) AS <col_def>;
         │
         ▼
 cur.execute(sql)
@@ -451,7 +452,7 @@ Both CLI and TUI maintain a `chat_history` list that is passed on each `agent_ex
 
 `setup_logging(verbose: bool)` configures the root Python logger:
 
-- `verbose=True`: `DEBUG` level for the `cypherrepl` logger; noisy third-party loggers (`openai`, `httpx`, `urllib3`, `langchain`, `langchain_openai`) are suppressed to `WARNING` to avoid clutter.
+- `verbose=True`: `DEBUG` level for the `mindstate` logger; noisy third-party loggers (`openai`, `httpx`, `urllib3`, `langchain`, `langchain_openai`) are suppressed to `WARNING` to avoid clutter.
 - `verbose=False`: `WARNING` level globally.
 
 ### 9.2 `VerboseCallback` — LangChain Callback Handler
@@ -517,7 +518,7 @@ build_send_cypher_tool(...)
 create_llm(settings, callbacks)
 create_agent_executor(llm, tool, system_prompt)
     │
-PromptSession(history=FileHistory(~/.cypher_repl_history), multiline=True)
+PromptSession(history=FileHistory(~/.mstate_history), multiline=True)
     │
 REPL loop
 ```
@@ -527,8 +528,8 @@ REPL loop
 `prompt_toolkit.PromptSession` drives the standard REPL with:
 
 - **Multiline mode**: `Enter` inserts a newline; `Esc+Enter` submits.
-- **Persistent history**: `FileHistory` persists to `~/.cypher_repl_history` across sessions.
-- **Prompt string**: `cypher> `
+- **Persistent history**: `FileHistory` persists to `~/.mstate_history` across sessions.
+- **Prompt string**: `mstate> `
 - `KeyboardInterrupt` (Ctrl+C) prints a reminder and continues.
 - `EOFError` (Ctrl+D) exits cleanly.
 
@@ -558,9 +559,9 @@ If the LLM agent was not initialized (configuration error), `agent_executor` is 
 
 ## 11. TUI Interface (`tui.py`)
 
-### 11.1 Architecture of `CypherReplTUI`
+### 11.1 Architecture of `MindStateTUI`
 
-`run_tui()` builds and runs a `textual.app.App` subclass (`CypherReplTUI`) inside a closure that captures `cur`, `conn`, `settings`, `system_prompt`, `verbose`, and `files`.
+`run_tui()` builds and runs a `textual.app.App` subclass (`MindStateTUI`) inside a closure that captures `cur`, `conn`, `settings`, `system_prompt`, `verbose`, and `files`.
 
 `textual` is imported lazily inside `run_tui()`. If `textual` is not installed, the function prints an error and returns cleanly — the dependency is effectively optional at import time (though it is listed in `pyproject.toml`).
 
@@ -637,7 +638,7 @@ Navigation:
 
 ### 11.5 Async Execution Model
 
-`CypherReplTUI._send(message)` is an `async` coroutine:
+`MindStateTUI._send(message)` is an `async` coroutine:
 
 - LLM calls use `asyncio.to_thread()` to run the synchronous `agent_executor.invoke()` in a thread pool, keeping the Textual event loop unblocked.
 - Direct Cypher calls similarly use `asyncio.to_thread()` wrapping `execute_cypher_with_smart_columns`.
@@ -679,7 +680,7 @@ When `--verbose` is passed:
 
 ## 12. Legacy Monolith (`cypher_llm_repl.py`)
 
-`cypher_llm_repl.py` is a self-contained single-file version of the REPL. It contains the same logic as the refactored `cypherrepl/` package but as module-level globals (no dataclasses, no dependency injection):
+`cypher_llm_repl.py` is a self-contained single-file version of the REPL. It contains the same logic as the refactored `mindstate/` package but as module-level globals (no dataclasses, no dependency injection):
 
 - Config read directly from `os.environ` into module-level variables.
 - `INIT_STATEMENTS` as a module-level list.
@@ -844,4 +845,4 @@ Both the CLI and TUI accumulate a `chat_history` list of `HumanMessage`/`AIMessa
 
 ### Monolith preserved alongside package
 
-`cypher_llm_repl.py` is kept as a working single-file alternative. Both implementations are kept functionally synchronized for the core REPL features. The package form (`cypherrepl/`) is the canonical implementation for new features (TUI, Azure OpenAI, structured settings).
+`cypher_llm_repl.py` is kept as a working single-file alternative. Both implementations are kept functionally synchronized for the core REPL features. The package form (`mindstate/`) is the canonical implementation for new features (TUI, Azure OpenAI, structured settings).

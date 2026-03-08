@@ -27,5 +27,4 @@ RUN git clone --branch PG16 https://github.com/apache/age.git /tmp/age \
     && cd / && rm -rf /tmp/age
 
 # Enable extensions on init
-COPY init-tristore.sql /docker-entrypoint-initdb.d/
-
+COPY init-mindstate.sql /docker-entrypoint-initdb.d/

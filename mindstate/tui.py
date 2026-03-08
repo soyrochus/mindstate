@@ -64,7 +64,7 @@ def run_tui(
         )
         return
 
-    class CypherReplTUI(App):
+    class MindStateTUI(App):
         CSS = """
         Screen {
             layout: vertical;
@@ -137,7 +137,7 @@ def run_tui(
 
         def compose(self) -> ComposeResult:  # type: ignore[override]
             # Title/Header
-            yield Static("CONVERSATION", classes="title")
+            yield Static("MindState TUI", classes="title")
 
             # Main area: single conversation pane on the left; optional logs on right
             with Horizontal(classes="main"):
@@ -606,4 +606,4 @@ def run_tui(
                 pass
 
     # Run app
-    CypherReplTUI().run()
+    MindStateTUI().run()
