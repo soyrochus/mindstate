@@ -10,11 +10,11 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.116.1",
+    "fastmcp>=3.0.0",
     "langchain>=0.3.27",
     "langchain-core>=0.3.74",
     "langchain-openai>=0.3.29",
     "lark>=1.2.2",
-    "mcp>=1.0.0",
     "prompt-toolkit>=3.0.51",
     "psycopg2-binary>=2.9.10",
     "python-dotenv>=1.1.1",

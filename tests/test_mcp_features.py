@@ -1,6 +1,8 @@
+import asyncio
 from dataclasses import replace
 from datetime import UTC, datetime
 
+from fastmcp import Client
 from fastapi.testclient import TestClient
 
 from mindstate.api import create_app, get_service
@@ -296,6 +298,19 @@ def test_mcp_enabled_tools_filtering(monkeypatch):
     settings = replace(settings, mcp=replace(settings.mcp, enabled_tools=frozenset({"remember", "recall"})))
     server = MCPServer(settings)
     assert sorted(server.list_tools()) == ["recall", "remember"]
+
+
+def test_fastmcp_registers_filtered_tools():
+    settings = get_settings()
+    settings = replace(settings, mcp=replace(settings.mcp, enabled_tools=frozenset({"remember", "recall"})))
+    server = MCPServer(settings)
+
+    async def _list_tool_names():
+        async with Client(server.app) as client:
+            tools = await client.list_tools()
+        return sorted(tool.name for tool in tools)
+
+    assert asyncio.run(_list_tool_names()) == ["recall", "remember"]
 
 
 def test_regression_existing_service_methods_unchanged(monkeypatch):

@@ -1,0 +1,9 @@
+{
+  "servers": {
+    "mindstate": {
+      "command": "uv",
+      "args": ["run", "mstate-mcp"],
+      "cwd": "${workspaceFolder}"
+    }
+  }
+}
