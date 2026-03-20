@@ -1,0 +1,61 @@
+services:
+  db:
+    build:
+      context: .
+      dockerfile: Dockerfile.db
+    environment:
+      POSTGRES_USER: ${PGUSER:-postgres}
+      POSTGRES_PASSWORD: ${PGPASSWORD:-secret}
+      POSTGRES_DB: ${PGDATABASE:-postgres}
+    volumes:
+      - db_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PGUSER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "5432:5432"
+
+  mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp
+    env_file:
+      - .env
+    environment:
+      # Override DB host to reach the db service over the Docker network
+      PGHOST: db
+      PGPORT: "5432"
+      # Use SSE transport so the MCP server is reachable over the network
+      MS_MCP_TRANSPORT: http
+      MS_MCP_HOST: "0.0.0.0"
+    ports:
+      - "${MS_MCP_PORT:-8001}:${MS_MCP_PORT:-8001}"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  repl:
+    build:
+      context: .
+      dockerfile: Dockerfile.repl
+    env_file:
+      - .env
+    environment:
+      PGHOST: db
+      PGPORT: "5432"
+      UV_PROJECT_ENVIRONMENT: /app/.venv
+    volumes:
+      - .:/workspace:ro
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+    depends_on:
+      db:
+        condition: service_healthy
+    profiles:
+      - repl
+
+volumes:
+  db_data:

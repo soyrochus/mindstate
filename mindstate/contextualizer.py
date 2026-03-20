@@ -310,7 +310,7 @@ class GraphContextualizer:
                 self.cur.execute(
                     f"""
                     SELECT * FROM cypher('{self.settings.graph_name}', $$
-                        MERGE (e:Entity:{ent.entity_type.title()} {{id: '{_escape_cypher(ent.node_id)}'}})
+                        MERGE (e:{ent.entity_type.title()} {{id: '{_escape_cypher(ent.node_id)}'}})
                         SET e.canonical_name = '{_escape_cypher(ent.canonical_name)}',
                             e.entity_type = '{_escape_cypher(ent.entity_type)}'
                         RETURN e
