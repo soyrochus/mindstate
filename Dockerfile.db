@@ -1,0 +1,29 @@
+# syntax=docker/dockerfile:1
+FROM pgvector/pgvector:0.8.2-pg18-bookworm
+
+# Install build dependencies for Apache AGE
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        git \
+        postgresql-server-dev-18 \
+        ca-certificates \
+        libreadline-dev \
+        zlib1g-dev \
+        flex \
+        bison \
+    ; \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Apache AGE (PG18 branch)
+RUN set -eux; \
+    git clone --branch PG18 https://github.com/apache/age.git /tmp/age; \
+    cd /tmp/age; \
+    make PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config; \
+    make PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config install; \
+    cd /; \
+    rm -rf /tmp/age
+
+# Enable extensions on init
+COPY init-mindstate.sql /docker-entrypoint-initdb.d/

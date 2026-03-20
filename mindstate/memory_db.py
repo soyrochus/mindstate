@@ -17,6 +17,9 @@ def _vector_literal(values: Sequence[float]) -> str:
 def ensure_memory_schema(cur, conn, settings: Settings) -> None:
     """Create additive canonical-memory structures while preserving substrate behavior."""
     statements = [
+        # SET LOCAL scopes the path change to this transaction only;
+        # the session-level path (e.g. ag_catalog set by init_age) is restored on COMMIT.
+        'SET LOCAL search_path = "$user", public;',
         "CREATE EXTENSION IF NOT EXISTS vector;",
         "CREATE EXTENSION IF NOT EXISTS pgcrypto;",
         """
@@ -90,7 +93,7 @@ def ensure_memory_schema(cur, conn, settings: Settings) -> None:
     ]
     for statement in statements:
         cur.execute(statement)
-    conn.commit()
+    conn.commit()  # SET LOCAL reverts here; session search_path is automatically restored
 
 
 def create_memory_item(cur, payload: RememberInput) -> MemoryItem:
